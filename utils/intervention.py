@@ -908,10 +908,11 @@ class PSCBM_Strategy:
     """
 
     def __init__(self, inter_strategy, train_loader, model, device, config):
-        if config.model.concept_learning in ("hard", "autoregressive"):
+        self.concept_learning = config.model.concept_learning
+        if self.concept_learning in ("hard", "autoregressive"):
             self.num_monte_carlo = config.model.num_monte_carlo
             self.needs_sampling = True
-        elif config.model.concept_learning in ("soft"): #"embedding"???
+        elif self.concept_learning in ("soft", "embedding"):
             self.num_monte_carlo = 1
             self.needs_sampling = False
         self.num_concepts = config.data.num_concepts
@@ -1057,10 +1058,14 @@ class PSCBM_Strategy:
         # Compute probabilities and set intervened-on probs to 0/1
         mcmc_probs = self.act_c(mcmc_logits)
 
-        # Set intervened-on hard concepts to 0/1
-        mcmc_probs = (c_true * c_mask).unsqueeze(2).repeat(
-            1, 1, self.num_monte_carlo
-        ) + mcmc_probs * (1 - c_mask).unsqueeze(2).repeat(1, 1, self.num_monte_carlo)
+        # If concept_learning is in the hard family, set intervened-on concepts to 0/1
+        if self.concept_learning in ("hard", "autoregressive"):
+            # Set intervened-on hard concepts to 0/1
+            mcmc_probs = (c_true * c_mask).unsqueeze(2).repeat(
+                1, 1, self.num_monte_carlo
+            ) + mcmc_probs * (1 - c_mask).unsqueeze(2).repeat(1, 1, self.num_monte_carlo)
+        # If concept_learning is in the soft family, don't set intervened-on concepts to 0/1
+        # Leave their soft values instead.
 
         return interv_mu, interv_cov, mcmc_probs, mcmc_logits
 
