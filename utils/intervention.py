@@ -15,6 +15,161 @@ import wandb
 from utils.minimize_constraint import minimize_constr
 from utils.utils import numerical_stability_check
 
+def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, loss_fn, device):
+    model.eval()
+    policies = config.model.inter_policy.split(",")
+    strategies = config.model.inter_strategy.split(",")
+    num_interventions = min(200, config.data.num_concepts)
+
+    # Intervening with different strategies
+    first_intervention = True
+    for strategy in strategies:
+        for policy in policies:
+            intervention_dataset_base = []
+
+
+
+            try:
+                intervention_policy = define_policy(policy)
+                intervention_strategy = define_strategy(
+                    strategy, train_loader, model, device, config
+                )
+            except:
+                print(
+                    f"Intervention strategy {strategy} with policy {policy} not implemented for model {config.model.model}."
+                )
+
+
+            with torch.no_grad():
+                for (k, batch) in enumerate(tqdm(test_loader), leave=True, position=0):
+                    batch_features = batch["features"].to(device)
+                    concepts_true = batch["concepts"].to(device)
+                    target_true = batch["labels"].to(device)
+
+                    # Get model's prediction
+                    (
+                        concepts_pred_probs,
+                        target_pred_logits,
+                        concepts_hard,
+                    ) = model(batch_features, epoch, validation=True)
+                    # concepts_pred_probs_m is the mean of predicted concept probabilities. In autoregressive it is
+                    # the mean over MCMC samples, in other methods there is only 1 value anyway
+                    if config.model.concept_learning == "autoregressive":
+                        concepts_pred_probs_m = torch.mean(
+                            concepts_pred_probs, dim=-1
+                        )  # Calculating the metrics on the average probabilities from MCMC
+                    else:
+                        concepts_pred_probs_m = concepts_pred_probs
+
+                    # Calculate loss before intervention
+                    target_loss, concepts_loss, total_loss = loss_fn(
+                        concepts_pred_probs_m,
+                        concepts_true,
+                        target_pred_logits,
+                        target_true,
+                    )
+
+                    # Store predictions
+                    metrics.update(
+                        target_loss,
+                        concepts_loss,
+                        total_loss,
+                        target_true,
+                        target_pred_logits,
+                        concepts_true,
+                        concepts_pred_probs_m,
+                    )
+
+                     intervention_dataset_base.append(
+                         [
+                             concepts_pred_probs.cpu(),
+                             concepts_true.cpu(),
+                             target_true.cpu(),
+                             batch_features.cpu(),
+                             concepts_hard.cpu(),
+                             concepts_pred_probs_m.cpu()
+                         ]
+                     )
+
+            # Calculate and log metrics
+            metrics_dict = metrics.compute(validation=True, config=config)
+
+            # define which metrics will be plotted against it
+            if first_intervention:
+                # define our custom x axis metric for wandb
+                wandb.define_metric("intervention/num_concepts_intervened")
+                first_intervention = False
+            for i, (k, v) in enumerate(metrics_dict.items()):
+                wandb.define_metric(
+                    f"intervention_{strategy}_{policy}/{k}",
+                    step_metric="intervention/num_concepts_intervened",
+                )
+                wandb.log(
+                    {
+                        f"intervention_{strategy}_{policy}/{k}": v,
+                        "intervention/num_concepts_intervened": 0,
+                    }
+                )
+            prints = f"Intervention on {0} concepts: "
+            for key, value in metrics_dict.items():
+                prints += f"{key}: {value:.3f} "
+            print(prints)
+            print()
+            metrics.reset()
+
+
+            intervention_dataset_base = [
+                (
+                    torch.cat(
+                        [sublist[i] for sublist in intervention_dataset_base], dim=0
+                    )
+                )
+                for i in range(len(intervention_dataset_base[0]))
+            ]
+
+            concepts_dataset_mask = torch.zeros_like(intervention_dataset_base[1])
+
+            for num_intervened in range(1, num_interventions + 1):
+                intervention_dataset = TensorDataset(
+                    *intervention_dataset_base, concepts_dataset_mask
+                )
+                intervention_loader = DataLoader(
+                    intervention_dataset,
+                    batch_size=config.model.val_batch_size,
+                    num_workers=config.workers,
+                    shuffle=False,
+                )
+                concepts_dataset_mask_new = []
+
+                with (torch.no_grad()):
+                    for k, batch in tqdm(
+                            enumerate(intervention_loader), leave=True, position=0
+                    ):
+                        (
+                            concepts_pred_probs,
+                            concepts_true,
+                            target_true,
+                            input_features,
+                            concepts_hard,
+                            concepts_pred_probs_m,
+                            concepts_mask,
+                        ) = [item.to(device) for item in batch]
+
+                        if config.model.concept_learning == "autoregressive":
+                            raise NotImplementedError()
+                        else:
+                            concepts_mask_new = intervention_policy.compute_intervention_mask(
+                            concepts_mask, concepts_pred_probs=concepts_pred_probs
+                            )
+
+                            concepts_interv_probs = intervention_strategy.compute_intervention(
+                                concepts_pred_probs,
+                                concepts_true,
+                                concepts_mask_new,
+                            )
+
+
+
 
 def intervene_scbm(
     train_loader, test_loader, model, metrics, epoch, config, loss_fn, device
@@ -371,16 +526,20 @@ def intervene_cbm(
             with torch.no_grad():
 
                 for k, batch in tqdm(enumerate(test_loader), leave=True, position=0):
+                    # Get features & ground-truth for label & concepts
                     batch_features, target_true = batch["features"].to(device), batch[
                         "labels"
                     ].to(device)
                     concepts_true = batch["concepts"].to(device)
 
+                    # Get model's prediction
                     (
                         concepts_pred_probs,
                         target_pred_logits,
                         concepts_hard,
                     ) = model(batch_features, epoch, validation=True)
+                    #concepts_pred_probs_m is the mean of predicted concept probabilities. In autoregressive it is
+                    # the mean over MCMC samples, in other methods there is only 1 value anyway
                     if config.model.concept_learning == "autoregressive":
                         concepts_pred_probs_m = torch.mean(
                             concepts_pred_probs, dim=-1
@@ -388,6 +547,7 @@ def intervene_cbm(
                     else:
                         concepts_pred_probs_m = concepts_pred_probs
 
+                    # Calculate loss before intervention
                     target_loss, concepts_loss, total_loss = loss_fn(
                         concepts_pred_probs_m,
                         concepts_true,
@@ -729,6 +889,182 @@ def define_strategy(inter_strategy, train_loader, model, device, config):
     return inter_strategy
 
 
+class PSCBM_Strategy:
+    """
+    A strategy for intervening on Post-Hoc SCBM using the conditional normal distribution.
+
+    This class defines a strategy for intervening on Post-Hoc SCBM(Stochastic Concept Bottleneck Model)s.
+    It supports different intervention strategies such as simple percentile, empirical percentile, and confidence interval optimal strategies.
+
+    Args:
+        inter_strategy (str): The name of the intervention strategy to use. Supported strategies are:
+                              - "simple_perc": Uses the logits corresponding to 5% and 95%.
+                              - "emp_perc": Uses the logits corresponding to 5th and 95th percentile of training predictions.
+                              - "conf_interval_optimal": Uses a confidence interval-based optimal strategy for SCBMs.
+        train_loader (torch.utils.data.DataLoader): DataLoader to obtain empirical percentiles of training data
+        model (torch.nn.Module): The model to be evaluated.
+        device (torch.device): The device to run the computations on.
+        config (dict): Configuration dictionary containing model and data settings.
+    """
+
+    def __init__(self, inter_strategy, train_loader, model, device, config):
+        if config.model.concept_learning in ("hard", "autoregressive"):
+            self.num_monte_carlo = config.model.num_monte_carlo
+            self.needs_sampling = True
+        elif config.model.concept_learning in ("soft"): #"embedding"???
+            self.num_monte_carlo = 1
+            self.needs_sampling = False
+        self.num_concepts = config.data.num_concepts
+        self.act_c = nn.Sigmoid()
+        if inter_strategy == "simple_perc":
+            self.interv_strat = PercentileStrategy()
+        elif inter_strategy == "emp_perc":
+            self.interv_strat = EmpiricalPercentileStrategy(
+                train_loader=train_loader, model=model, device=device, is_scbm=True
+            )
+        elif inter_strategy == "conf_interval_optimal":
+            self.interv_strat = ConfIntervalOptimalStrategy(level=config.model.level)
+        else:
+            raise NotImplementedError(
+                "No such strategy as",
+                config.model.inter_strategy,
+                "defined for model",
+                config.model.model,
+                "!",
+            )
+
+    def compute_intervention(self, c_mu, c_cov, c_true, c_mask):
+        """
+        Generate an intervention on an SCBM using the conditional normal distribution.
+
+        First, this function computes the logits of the intervened-on concepts based on the intervention strategy.
+        Then, using the predicted concept mean and covariance, it computes the conditional normal distribution, conditioned on
+        the intervened-on concept logits. To this end, the order is permuted such that the intervened-on concepts form a block at the start.
+        Finally, the method samples from the conditional normal distribution and permutes the results back to the original order.
+
+        Args:
+            c_mu (torch.Tensor): The predicted mean values of the concepts. Shape: (batch_size, num_concepts)
+            c_cov (torch.Tensor): The predicted covariance matrix of the concepts. Shape: (batch_size, num_concepts, num_concepts)
+            c_true (torch.Tensor): The ground-truth concept values. Shape: (batch_size, num_concepts)
+            c_mask (torch.Tensor): A mask indicating which concepts are intervened-on. Shape: (batch_size, num_concepts)
+
+        Returns:
+            tuple: A tuple containing the intervened-on concept means, covariances, MCMC sampled concept probabilities, and logits.
+                    Note that the probabilities are set to 0/1 for the intervened-on concepts according to the ground-truth.
+        """
+        num_intervened = c_mask.sum(1)[0]
+        device = c_mask.device
+
+        if num_intervened == 0:
+            # No intervention
+            interv_mu = c_mu
+            interv_cov = c_cov
+            # Sample from normal distribution
+            dist = MultivariateNormal(interv_mu, covariance_matrix=interv_cov)
+            mcmc_logits = dist.rsample([self.num_monte_carlo]).movedim(
+                0, -1
+            )  # [batch_size,bottleneck_size,mcmc_size]
+
+        else:
+            # Compute logits of intervened-on concepts
+            c_intervened_logits = self.interv_strat.compute_intervened_logits(
+                c_mu, c_cov, c_true, c_mask
+            )
+
+            ## Compute conditional normal distribution sample-wise
+            # Permute covariance s.t. intervened-on concepts are a block at start
+            indices = torch.argsort(c_mask, dim=1, descending=True, stable=True)
+            perm_cov = c_cov.gather(
+                1, indices.unsqueeze(2).expand(-1, -1, c_cov.size(2))
+            )
+            perm_cov = perm_cov.gather(
+                2, indices.unsqueeze(1).expand(-1, c_cov.size(1), -1)
+            )
+            perm_mu = c_mu.gather(1, indices)
+            perm_c_intervened_logits = c_intervened_logits.gather(1, indices)
+
+            # Compute mu and covariance conditioned on intervened-on concepts
+            # Intermediate steps
+            perm_intermediate_cov = torch.matmul(
+                perm_cov[:, num_intervened:, :num_intervened],
+                torch.inverse(perm_cov[:, :num_intervened, :num_intervened]),
+            )
+            perm_intermediate_mu = (
+                perm_c_intervened_logits[:, :num_intervened]
+                - perm_mu[:, :num_intervened]
+            )
+            # Mu and Cov
+            perm_interv_mu = perm_mu[:, num_intervened:] + torch.matmul(
+                perm_intermediate_cov, perm_intermediate_mu.unsqueeze(-1)
+            ).squeeze(-1)
+            perm_interv_cov = perm_cov[
+                :, num_intervened:, num_intervened:
+            ] - torch.matmul(
+                perm_intermediate_cov, perm_cov[:, :num_intervened, num_intervened:]
+            )
+
+            # Adjust for floating point errors in the covariance computation to keep it symmetric
+            perm_interv_cov = numerical_stability_check(
+                perm_interv_cov, device=device
+            )  # Uncomment if Normal throws an error. Takes some time so maybe code it more smartly
+
+            if self.needs_sampling:
+                # Sample from conditional normal
+                perm_dist = MultivariateNormal(
+                    perm_interv_mu, covariance_matrix=perm_interv_cov
+                )
+                perm_mcmc_logits = (
+                    perm_dist.rsample([self.num_monte_carlo])
+                    .movedim(0, -1)
+                    .to(torch.float32)
+                )  # [bottleneck_size-num_intervened,mcmc_size]
+
+            else:
+                perm_mcmc_logits = perm_interv_mu.unsqueeze(-1)
+
+            # Concat logits of intervened-on concepts
+            perm_mcmc_logits = torch.cat(
+                (
+                    perm_c_intervened_logits[:, :num_intervened]
+                    .unsqueeze(-1)
+                    .repeat(1, 1, self.num_monte_carlo),
+                    perm_mcmc_logits,
+                ),
+                dim=1,
+            )
+
+            # Permute back into original form and store
+            indices_reversed = torch.argsort(indices)
+            mcmc_logits = perm_mcmc_logits.gather(
+                1,
+                indices_reversed.unsqueeze(2).expand(-1, -1, perm_mcmc_logits.size(2)),
+            )
+
+            # Return conditional mu&cov
+            assert (
+                torch.argsort(indices[:, num_intervened:])
+                == torch.arange(len(perm_interv_mu[0][:]), device=device)
+            ).all()  # Check that non-intervened concepts weren't permuted s.t. no permutation of interv_mu is needed
+            interv_mu = perm_interv_mu
+            interv_cov = perm_interv_cov
+
+        assert (
+            (mcmc_logits.isnan()).any()
+            == (interv_mu.isnan()).any()
+            == (interv_cov.isnan()).any()
+            == False
+        )
+        # Compute probabilities and set intervened-on probs to 0/1
+        mcmc_probs = self.act_c(mcmc_logits)
+
+        # Set intervened-on hard concepts to 0/1
+        mcmc_probs = (c_true * c_mask).unsqueeze(2).repeat(
+            1, 1, self.num_monte_carlo
+        ) + mcmc_probs * (1 - c_mask).unsqueeze(2).repeat(1, 1, self.num_monte_carlo)
+
+        return interv_mu, interv_cov, mcmc_probs, mcmc_logits
+
+
 class SCBM_Strategy:
     """
     A strategy for intervening on SCBM using the conditional normal distribution.
@@ -895,7 +1231,7 @@ class SCBM_Strategy:
 
         return interv_mu, interv_cov, mcmc_probs, mcmc_logits
 
-
+# What is the point of this class which has half the functionality of PercentileStrategy and doesn't make any use of the 'Stochastic' part?
 class SCBMPercentileStrategy:
     # Set intervened concept logits to 0.05 & 0.95
     def __init__(self):
