@@ -127,7 +127,7 @@ def get_empirical_covariance(dataloader):
         concepts = batch["concepts"]
         data.append(concepts)
     data = torch.cat(data)  # Concatenate all data into a single tensor
-    data_logits = torch.logit(0.05 + 0.9 * data)
+    data_logits = torch.logit(data, eps=1e-6)
     covariance = torch.cov(data_logits.transpose(0, 1))
 
     # Bringing it into lower triangular form
@@ -153,6 +153,62 @@ def get_empirical_covariance(dataloader):
     #     else:
     #         cov += torch.matmul(temp, temp.transpose(-2, -1)).sum(0)
     # cov = cov / num_samples
+
+    ########
+    return lower_triangle
+
+def get_empirical_covariance_of_predictions(CBM_model, dataloader):
+    """
+    Compute the empirical covariance matrix of the concept logits predicted by CBM_model from features in dataloader.
+
+    This function first concatenates all the concept data into a single tensor, then applies a logit transformation
+    to the data to work in the correct space. The covariance matrix is computed from the transformed data
+    and brought into a lower triangular form using Cholesky decomposition. In comments, an alternative
+    covariance computation is provided that can be used if the dataset is too large to fit into memory.
+
+    Args:
+        dataloader (torch.utils.data.DataLoader): A dataloader containing batches of data with a "concepts" key.
+
+    Returns:
+        torch.Tensor: The lower triangular form of the empirical covariance matrix.
+    """
+    data = []
+    for batch in dataloader:
+        features = batch["features"]
+        # Calculate concept logits with CBM_model
+        c_logits = CBM_model.concept_predictor(CBM_model.encoder(features))
+        data.append(c_logits)
+    data = torch.cat(data)  # Concatenate all data into a single tensor
+    covariance = torch.cov(data.transpose(0, 1))
+
+    # Bringing it into lower triangular form
+    covariance = numerical_stability_check(covariance, device="cpu")
+    lower_triangle = torch.linalg.cholesky(covariance)
+
+    # ###### Alternative cov computation if dataset was too large for memory
+    # num_samples = 0
+    #
+    # # Calculate concept mean
+    # for i, batch in enumerate(dataloader):
+    #     features = batch["features"]
+    #     if i == 0:
+    #         c_logits = CBM_model.concept_predictor(CBM_model.encoder(features)).sum(0)
+    #     else:
+    #         c_logits += CBM_model.concept_predictor(CBM_model.encoder(features)).sum(0)
+    #     num_samples += c_logits.shape[0]
+    # logits_mean = c_logits / num_samples
+    #
+    # # Calculate covariance matrix
+    # for i, batch in enumerate(dataloader):
+    #     features = batch["features"]
+    #     c_logits = CBM_model.concept_predictor(CBM_model.encoder(features)).sum(0)
+    #     temp = (c_logits - logits_mean).unsqueeze(-1)
+    #     if i == 0:
+    #         cov = torch.matmul(temp, temp.transpose(-2, -1)).sum(0)
+    #     else:
+    #         cov += torch.matmul(temp, temp.transpose(-2, -1)).sum(0)
+    # cov = cov / num_samples
+    # lower_triangle = torch.linalg.cholesky(cov)
 
     ########
     return lower_triangle
