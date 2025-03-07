@@ -12,6 +12,7 @@ from torchvision import models
 
 from models.networks import FCNNEncoder
 from utils.training import freeze_module, unfreeze_module
+from utils.data import get_empirical_covariance
 
 
 def create_model(config):
@@ -22,9 +23,136 @@ def create_model(config):
         return CBM(config)
     elif config.model.model == "scbm":
         return SCBM(config)
+    elif config.model.model == "pscbm": # Post-Hoc SCBM
+        return PSCBM(config)
     else:
         print("Could not create model with name ", config.model, "!")
         quit()
+
+class PSCBM(nn.Module):
+    """
+    Post-Hoc Stochastic Concept Bottleneck Model (PSCBM)
+
+    This class implements a Post-Hoc Stochastic Concept Bottleneck Model (PSCBM) which adapts SCBM to work Post-Hoc:
+    The covariance matrix is computed for a trained Concept Bottleneck Model (CBM).
+
+    Supported versions of covariance matrices:
+    - empirical over ground truth concept values
+    - empirical over model predictions
+    """
+
+    def __init__(self, config):
+        super(PSCBM, self).__init__()
+
+        config_model = config.model
+        self.num_concepts = config.data.num_concepts
+        self.num_classes = config.data.num_classes
+        self.encoder_arch = config_model.encoder_arch
+        self.head_arch = config_model.head_arch
+        self.training_mode = config_model.training_mode
+        self.concept_learning = config_model.concept_learning
+        self.num_monte_carlo = config_model.num_monte_carlo
+        self.straight_through = config_model.straight_through
+        self.curr_temp = 1.0
+        if self.training_mode == "joint":
+            self.num_epochs = config_model.j_epochs
+        else:
+            self.num_epochs = config_model.t_epochs
+        self.cov_type = config_model.cov_type
+
+        #Architecture is exported to a sub-class:
+        config_CBM = config.CBM
+        self.CBM = CBM(config_CBM)
+
+        # Compute covariance
+        if self.cov_type in ("empirical_true", "empirical_predicted"):
+            self.sigma_concepts = self.sigma_concepts = torch.zeros(
+                int(self.num_concepts * (self.num_concepts + 1) / 2)
+            )
+
+        # In a latter step I want to implement training the covariance matrix for intervention efficacy.
+        else:
+            raise NotImplementedError("Other covariance types are not implemented yet.")
+
+
+    def forward(self, x, epoch, c_true=None, validation=False):
+        return self.CBM.forward(x, epoch, c_true=c_true, validation=validation)
+
+    def intervene(self, concepts_interv_probs, concepts_mask, input_features):
+        """
+        This function does de facto the same as the corresponding function in regular CBM. It is however simplified,
+        because autoregressive mode is not supported. (Common case: I might have called the CBM's function, but I did
+        not know it before I rewrote it.
+        It is of course assumed that concept correlations have already been applied to the passed probabilities.
+        Args:
+            concepts_interv_probs:
+            concepts_mask:
+            input_features:
+
+        Returns:
+            y_pred_logits: the model's prediction after correcting the concepts.
+        """
+
+        if self.concept_learning == "soft":
+            # Soft CBM
+            c_logit = torch.logit(concepts_interv_probs, eps=1e-6)
+            y_pred_logits = self.CBM.head(c_logit)
+
+        elif self.concept_learning == "hard":
+            y_pred_probs = 0
+            c_prob_mcmc = concepts_interv_probs.unsqueeze(-1).expand(
+                -1, -1, self.num_monte_carlo
+            )
+            c = torch.bernoulli(c_prob_mcmc)
+
+            # Fix intervened-on concepts to ground truth
+            c[concepts_mask == 1] = (
+                concepts_interv_probs[concepts_mask == 1]
+                .unsqueeze(-1)
+                .expand(-1, self.num_monte_carlo)
+            )
+
+            for i in range(self.num_monte_carlo):
+                c_i = c[:, :, i]
+                y_pred_logits_i = self.CBM.head(c_i)
+                if self.pred_dim == 1:
+                    y_pred_probs += torch.sigmoid(
+                        y_pred_logits_i
+                    )
+                else:
+                    y_pred_probs += torch.softmax(
+                        y_pred_logits_i, dim=1
+                    )
+
+            y_pred_probs /= self.num_monte_carlo
+            if self.pred_dim == 1:
+                y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
+            else:
+                y_pred_logits = torch.log(y_pred_probs + 1e-6)
+
+        # Copy-pasted from the respective CBM function
+        elif self.concept_learning == "embedding":
+            intermediate = self.CBM.encoder(input_features)
+            c_p = [p(intermediate) for p in self.CBM.positive_embeddings]
+            c_n = [n(intermediate) for n in self.CBM.negative_embeddings]
+
+            z_prob = [
+                concepts_interv_probs[:, i].unsqueeze(1) * c_p[i] +
+                (1 - concepts_interv_probs[:, i].unsqueeze(1)) * c_n[i]
+                for i in range(self.num_concepts)
+            ]
+            z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
+            y_pred_logits = self.head(z_prob)
+
+        return y_pred_logits
+
+    def freeze_c(self):
+        self.CBM.head.apply(freeze_module)
+
+    def freeze_t(self):
+        self.CBM.head.apply(unfreeze_module)
+        self.CBM.encoder.apply(freeze_module)
+        self.CBM.concept_predictor.apply(freeze_module)
 
 
 class SCBM(nn.Module):
@@ -124,14 +252,14 @@ class SCBM(nn.Module):
             self.sigma_concepts = torch.zeros(
                 int(self.num_concepts * (self.num_concepts + 1) / 2)
             )
-        else:
+        else: # "amortized"
             self.sigma_concepts = nn.Linear(
                 n_features,
                 int(self.num_concepts * (self.num_concepts + 1) / 2),
                 bias=True,
             )
             self.sigma_concepts.weight.data *= (
-                0.01  # To prevent exploding precision matrix at initialization
+                0.01  # To prevent exploding covariance matrix at initialization
             )
 
         # Assume binary concepts
@@ -187,7 +315,7 @@ class SCBM(nn.Module):
             c_sigma = self.sigma_concepts.repeat(c_mu.size(0), 1)
         elif self.cov_type == "empirical":
             c_sigma = self.sigma_concepts.unsqueeze(0).repeat(c_mu.size(0), 1, 1)
-        else:
+        else: # "amortized"
             c_sigma = self.sigma_concepts(intermediate)
 
         if self.cov_type == "empirical":
@@ -236,6 +364,7 @@ class SCBM(nn.Module):
 
         # MCMC loop for predicting label
         y_pred_probs_i = 0
+        # Couldn't this loop be avoided?
         for i in range(self.num_monte_carlo):
             if self.concept_learning == "hard":
                 c_i = c_mcmc[:, :, i]
