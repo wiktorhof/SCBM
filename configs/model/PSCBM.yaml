@@ -1,0 +1,26 @@
+defaults:
+  - model_defaults # Inherit model_defaults arguments
+
+
+# --------------------------
+#         Model
+# --------------------------
+model: 'pscbm' # Model's name
+tag: 'pscbm' # Model's tag for wandb logging
+concept_learning: 'hard' # Characteristics of concept bottleneck, either hard {0,1}, or soft logits ['hard', 'soft', 'cem']
+# I will then also want to use CEM.
+
+
+# Covariance
+cov_type: 'amortized' # Covariance specification. Empirical_true computes the empirical covariance over the true labels of the training set and fixes it.
+# Empirical_predicted computes the covariance over concepts predicted by the model's encoder ['empirical_true', 'empirical_predicted']
+reg_precision: 'None' # Regularization strategy of covariance ['l1', None] if it is learned
+reg_weight: 1 # Regularization strength if reg_precision is not None
+
+# --------------------------
+#         Policy
+# --------------------------
+inter_policy: 'random,prob_unc' # Comma-separated intervention policies to determine which concept to intervene. Combinable options: ['random','prob_unc']
+inter_strategy: 'simple_perc,emp_perc,conf_interval_optimal' # Comma-separated intervention strategies to determine how to perform interventions. Combinable options: ['simple_perc', 'emp_perc', 'conf_interval_optimal']
+level: 0.99 # Confidence level for confidence interval based intervention strategy
+
