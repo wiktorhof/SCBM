@@ -29,7 +29,10 @@ def get_data(config_base, config, gen):
     Returns:
         tuple: A tuple containing the training data loader, validation data loader, and test data loader.
     """
-    hostname = os.uname()[1]
+    try:
+        hostname = os.uname()[1]
+    except AttributeError: # On Windows, os doesn't have the attribute uname. The error implicitly means that I am not on the cluster
+        hostname = ''
     if "biomed" in hostname:
         # Remote Datafolder for our group cluster
         config.data_path = "/cluster/dataset/vogtlab/Projects/CBM/"
