@@ -32,6 +32,13 @@ def create_loss(config):
             alpha=config.model.alpha,
             config=config.model,
         )
+    elif config.model.model == "pscbm":
+        return CBLoss(
+            num_classes=config.data.num_classes,
+            reduction="mean",
+            alpha=config.model.alpha,
+            config=config.model,
+        )
     else:
         raise NotImplementedError
 
@@ -158,6 +165,7 @@ class SCBLoss(nn.Module):
         """
 
         assert torch.all((concepts_true == 0) | (concepts_true == 1))
+        # Concepts MCMC means the M concept samples from Monte Carlo?
         concepts_true_expanded = concepts_true.unsqueeze(-1).expand_as(
             concepts_mcmc_probs
         )
