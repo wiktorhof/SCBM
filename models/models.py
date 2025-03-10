@@ -62,7 +62,7 @@ class PSCBM(nn.Module):
 
         #Architecture is exported to a sub-class:
         config_CBM = config.CBM
-        self.CBM = CBM(config_CBM)
+        self.CBM = CBM(config)
 
         # Compute covariance
         if self.cov_type in ("empirical_true", "empirical_predicted"):
