@@ -175,18 +175,20 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader):
     Returns:
         torch.Tensor: The lower triangular form of the empirical covariance matrix.
     """
-    data = []
-    for batch in dataloader:
-        features = batch["features"]
-        # Calculate concept logits with CBM_model
-        c_logits = CBM_model.concept_predictor(CBM_model.encoder(features))
-        data.append(c_logits)
-    data = torch.cat(data)  # Concatenate all data into a single tensor
-    covariance = torch.cov(data.transpose(0, 1))
+    CBM_model.eval()
+    with torch.no_grad():
+        data = []
+        for batch in dataloader:
+            features = batch["features"]
+            # Calculate concept logits with CBM_model
+            c_logits = CBM_model.concept_predictor(CBM_model.encoder(features))
+            data.append(c_logits)
+        data = torch.cat(data)  # Concatenate all data into a single tensor
+        covariance = torch.cov(data.transpose(0, 1))
 
-    # Bringing it into lower triangular form
-    covariance = numerical_stability_check(covariance, device="cpu")
-    lower_triangle = torch.linalg.cholesky(covariance)
+        # Bringing it into lower triangular form
+        covariance = numerical_stability_check(covariance, device="cpu")
+        lower_triangle = torch.linalg.cholesky(covariance)
 
     # ###### Alternative cov computation if dataset was too large for memory
     # num_samples = 0
