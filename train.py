@@ -18,16 +18,18 @@ import wandb
 from models.losses import create_loss
 from models.models import create_model
 
-from utils.data import get_data, get_empirical_covariance, get_concept_groups
-from utils.intervention import intervene_cbm, intervene_scbm
+from utils.data import get_data, get_empirical_covariance, get_empirical_covariance_of_predictions, get_concept_groups
+from utils.intervention import intervene_cbm, intervene_scbm, intervene_pscbm
 from utils.training import (
     freeze_module,
     unfreeze_module,
     create_optimizer,
     train_one_epoch_cbm,
     train_one_epoch_scbm,
+    train_one_epoch_pscbm,
     validate_one_epoch_cbm,
     validate_one_epoch_scbm,
+    validate_one_epoch_pscbm,
     Custom_Metrics,
 )
 from utils.utils import reset_random_seeds
@@ -43,7 +45,7 @@ def train(config):
 
     Parameters
     ----------
-    configs: dict
+    config: dict
         The config settings for training and validating as defined in configs or in the command line.
     """
     # ---------------------------------
@@ -116,8 +118,10 @@ def train(config):
     # Initialize model and training objects
     model = create_model(config)
     # Initialize covariance with empirical covariance
-    if config.model.get("cov_type") == "empirical":
+    if config.model.get("cov_type") in ("empirical", "empirical_true"): # empirical_true in PSCBM is equivalent to empirical in SCBM (preserved for backward compatibility)
         model.sigma_concepts = get_empirical_covariance(train_loader).to(device)
+    elif config.model.get("cov_type") == "empirical_predicted": # only in the case of PSCBM
+        model.sigma_concepts = get_empirical_covariance_of_predictions(model.CBM,train_loader).to(device)
     elif config.model.get("cov_type") == "global":
         lower_triangle = get_empirical_covariance(train_loader).to(device)
         rows, cols = torch.tril_indices(
@@ -143,10 +147,14 @@ def train(config):
         validate_one_epoch = validate_one_epoch_cbm
         train_one_epoch = train_one_epoch_cbm
         intervene = intervene_cbm
-    else:
+    elif config.model.model == "scbm":
         validate_one_epoch = validate_one_epoch_scbm
         train_one_epoch = train_one_epoch_scbm
         intervene = intervene_scbm
+    elif config.model.model == "pscbm":
+        validate_one_epoch = validate_one_epoch_pscbm
+        train_one_epoch = train_one_epoch_pscbm
+        intervene = intervene_pscbm
 
     print(
         "TRAINING "
