@@ -13,6 +13,10 @@ import wandb
 from utils.metrics import calc_target_metrics, calc_concept_metrics
 from utils.plotting import compute_and_plot_heatmap
 
+def train_one_epoch_pscbm(train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device):
+    train_one_epoch_cbm(train_loader, model.CBM, optimizer, mode, metrics, epoch, config, loss_fn, device
+    )
+    return
 
 def train_one_epoch_scbm(
     train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device
@@ -214,6 +218,29 @@ def train_one_epoch_cbm(
     print(prints)
     metrics.reset()
     return
+
+def validate_one_epoch_pscbm(
+    loader,
+    model,
+    metrics,
+    epoch,
+    config,
+    loss_fn,
+    device,
+    test=False,
+    concept_names_graph=None,
+):
+    validate_one_epoch_cbm(
+            loader,
+            model.CBM,
+            metrics,
+            epoch,
+            config,
+            loss_fn,
+            device,
+            test=False,
+            concept_names_graph=None,
+    )
 
 
 def validate_one_epoch_scbm(
