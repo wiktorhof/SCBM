@@ -117,11 +117,14 @@ def train(config):
 
     # Initialize model and training objects
     model = create_model(config)
+
     # Initialize covariance with empirical covariance
     if config.model.get("cov_type") in ("empirical", "empirical_true"): # empirical_true in PSCBM is equivalent to empirical in SCBM (preserved for backward compatibility)
-        model.sigma_concepts = get_empirical_covariance(train_loader).to(device)
+        (model.sigma_concepts, model.covariance) = [t.to(device) for t in get_empirical_covariance(train_loader)]
     elif config.model.get("cov_type") == "empirical_predicted": # only in the case of PSCBM
-        model.sigma_concepts = get_empirical_covariance_of_predictions(model.CBM,train_loader).to(device)
+        # I suppose, the .to(device) was redundant. If the entire model is moved to device, its attributes should be as well, no?
+        (model.sigma_concepts, model.covariance) = [t.to(device) for t in get_empirical_covariance_of_predictions(model.CBM,train_loader)]
+
     elif config.model.get("cov_type") == "global":
         lower_triangle = get_empirical_covariance(train_loader).to(device)
         rows, cols = torch.tril_indices(
@@ -156,132 +159,137 @@ def train(config):
         train_one_epoch = train_one_epoch_pscbm
         intervene = intervene_pscbm
 
-    print(
-        "TRAINING "
-        + str(config.model.model)
-        + ": "
-        + str(config.model.concept_learning + "\n")
-    )
-
-    # Pretraining autoregressive concept structure for AR baseline
-    if (
-        config.model.get("pretrain_concepts")
-        and config.model.concept_learning == "autoregressive"
-    ):
-        print("\nStarting concepts pre-training!\n")
-        mode = "c"
-
-        # Freeze the target prediction part
-        model.freeze_c()
-        model.encoder.apply(freeze_module)  # Freezing the encoder
-
-        c_optimizer = create_optimizer(config.model, model)
-        lr_scheduler = optim.lr_scheduler.StepLR(
-            c_optimizer,
-            step_size=config.model.decrease_every,
-            gamma=1 / config.model.lr_divisor,
+    if config.model.model == "pscbm" and config.model.load_CBM and config.model.cov_type in ("empirical_true", "empirical_predicted"):
+        print(
+            "USING a pretrained CBM. No training is performed."
         )
-        for epoch in range(p_epochs):
-            # Validate the model periodically
-            if epoch % config.model.validate_per_epoch == 0:
-                print("\nEVALUATION ON THE VALIDATION SET:\n")
-                validate_one_epoch(
-                    val_loader, model, metrics, epoch, config, loss_fn, device
-                )
-            train_one_epoch(
-                train_loader,
-                model,
-                c_optimizer,
-                mode,
-                metrics,
-                epoch,
-                config,
-                loss_fn,
-                device,
-            )
-            lr_scheduler.step()
-
-        model.encoder.apply(unfreeze_module)  # Unfreezing the encoder
-
-    # For sequential & independent training: first stage is training of concept encoder
-    if config.model.training_mode in ("sequential", "independent"):
-        print("\nStarting concepts training!\n")
-        mode = "c"
-
-        # Freeze the target prediction part
-        model.freeze_c()
-
-        c_optimizer = create_optimizer(config.model, model)
-        lr_scheduler = optim.lr_scheduler.StepLR(
-            c_optimizer,
-            step_size=config.model.decrease_every,
-            gamma=1 / config.model.lr_divisor,
-        )
-        for epoch in range(c_epochs):
-            # Validate the model periodically
-            if epoch % config.model.validate_per_epoch == 0:
-                print("\nEVALUATION ON THE VALIDATION SET:\n")
-                validate_one_epoch(
-                    val_loader, model, metrics, epoch, config, loss_fn, device
-                )
-            train_one_epoch(
-                train_loader,
-                model,
-                c_optimizer,
-                mode,
-                metrics,
-                epoch,
-                config,
-                loss_fn,
-                device,
-            )
-            lr_scheduler.step()
-
-        # Prepare parameters for target training by unfreezing the target prediction part and freezing the concept encoder
-        model.freeze_t()
-
-    # Sequential vs. joint optimisation
-    if config.model.training_mode in ("sequential", "independent"):
-        print("\nStarting target training!\n")
-        mode = "t"
     else:
-        print("\nStarting joint training!\n")
-        mode = "j"
+        print(
+            "TRAINING "
+            + str(config.model.model)
+            + ": "
+            + str(config.model.concept_learning + "\n")
+        )
 
-    optimizer = create_optimizer(config.model, model)
-    lr_scheduler = optim.lr_scheduler.StepLR(
-        optimizer,
-        step_size=config.model.decrease_every,
-        gamma=1 / config.model.lr_divisor,
-    )
+        # Pretraining autoregressive concept structure for AR baseline
+        if (
+            config.model.get("pretrain_concepts")
+            and config.model.concept_learning == "autoregressive"
+        ):
+            print("\nStarting concepts pre-training!\n")
+            mode = "c"
 
-    # If sequential & independent training: second stage is training of target predictor
-    # If joint training: training of both concept encoder and target predictor
-    for epoch in range(0, t_epochs):
-        if epoch % config.model.validate_per_epoch == 0:
-            print("\nEVALUATION ON THE VALIDATION SET:\n")
-            validate_one_epoch(
-                val_loader, model, metrics, epoch, config, loss_fn, device
+            # Freeze the target prediction part
+            model.freeze_c()
+            model.encoder.apply(freeze_module)  # Freezing the encoder
+
+            c_optimizer = create_optimizer(config.model, model)
+            lr_scheduler = optim.lr_scheduler.StepLR(
+                c_optimizer,
+                step_size=config.model.decrease_every,
+                gamma=1 / config.model.lr_divisor,
             )
-        train_one_epoch(
-            train_loader,
-            model,
+            for epoch in range(p_epochs):
+                # Validate the model periodically
+                if epoch % config.model.validate_per_epoch == 0:
+                    print("\nEVALUATION ON THE VALIDATION SET:\n")
+                    validate_one_epoch(
+                        val_loader, model, metrics, epoch, config, loss_fn, device
+                    )
+                train_one_epoch(
+                    train_loader,
+                    model,
+                    c_optimizer,
+                    mode,
+                    metrics,
+                    epoch,
+                    config,
+                    loss_fn,
+                    device,
+                )
+                lr_scheduler.step()
+
+            model.encoder.apply(unfreeze_module)  # Unfreezing the encoder
+
+        # For sequential & independent training: first stage is training of concept encoder
+        if config.model.training_mode in ("sequential", "independent"):
+            print("\nStarting concepts training!\n")
+            mode = "c"
+
+            # Freeze the target prediction part
+            model.freeze_c()
+
+            c_optimizer = create_optimizer(config.model, model)
+            lr_scheduler = optim.lr_scheduler.StepLR(
+                c_optimizer,
+                step_size=config.model.decrease_every,
+                gamma=1 / config.model.lr_divisor,
+            )
+            for epoch in range(c_epochs):
+                # Validate the model periodically
+                if epoch % config.model.validate_per_epoch == 0:
+                    print("\nEVALUATION ON THE VALIDATION SET:\n")
+                    validate_one_epoch(
+                        val_loader, model, metrics, epoch, config, loss_fn, device
+                    )
+                train_one_epoch(
+                    train_loader,
+                    model,
+                    c_optimizer,
+                    mode,
+                    metrics,
+                    epoch,
+                    config,
+                    loss_fn,
+                    device,
+                )
+                lr_scheduler.step()
+
+            # Prepare parameters for target training by unfreezing the target prediction part and freezing the concept encoder
+            model.freeze_t()
+
+        # Sequential vs. joint optimisation
+        if config.model.training_mode in ("sequential", "independent"):
+            print("\nStarting target training!\n")
+            mode = "t"
+        else:
+            print("\nStarting joint training!\n")
+            mode = "j"
+
+        optimizer = create_optimizer(config.model, model)
+        lr_scheduler = optim.lr_scheduler.StepLR(
             optimizer,
-            mode,
-            metrics,
-            epoch,
-            config,
-            loss_fn,
-            device,
+            step_size=config.model.decrease_every,
+            gamma=1 / config.model.lr_divisor,
         )
-        lr_scheduler.step()
 
-    model.apply(freeze_module)
-    if config.save_model:
-        torch.save(model.state_dict(), join(experiment_path, "model.pth"))
-        print("\nTRAINING FINISHED, MODEL SAVED!", flush=True)
-    else:
-        print("\nTRAINING FINISHED", flush=True)
+        # If sequential & independent training: second stage is training of target predictor
+        # If joint training: training of both concept encoder and target predictor
+        for epoch in range(0, t_epochs):
+            if epoch % config.model.validate_per_epoch == 0:
+                print("\nEVALUATION ON THE VALIDATION SET:\n")
+                validate_one_epoch(
+                    val_loader, model, metrics, epoch, config, loss_fn, device
+                )
+            train_one_epoch(
+                train_loader,
+                model,
+                optimizer,
+                mode,
+                metrics,
+                epoch,
+                config,
+                loss_fn,
+                device,
+            )
+            lr_scheduler.step()
+
+        model.apply(freeze_module)
+        if config.save_model:
+            torch.save(model.state_dict(), join(experiment_path, "model.pth"))
+            print("\nTRAINING FINISHED, MODEL SAVED!", flush=True)
+        else:
+            print("\nTRAINING FINISHED", flush=True)
 
     print("\nEVALUATION ON THE TEST SET:\n")
     validate_one_epoch(

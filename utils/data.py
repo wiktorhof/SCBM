@@ -158,7 +158,7 @@ def get_empirical_covariance(dataloader):
     # cov = cov / num_samples
 
     ########
-    return lower_triangle
+    return lower_triangle, covariance
 
 def get_empirical_covariance_of_predictions(CBM_model, dataloader):
     """
@@ -216,7 +216,7 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader):
     # lower_triangle = torch.linalg.cholesky(cov)
 
     ########
-    return lower_triangle
+    return lower_triangle, covariance
 
 
 def get_concept_groups(config):

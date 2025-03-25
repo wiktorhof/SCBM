@@ -61,8 +61,18 @@ class PSCBM(nn.Module):
         self.cov_type = config_model.cov_type
 
         #Architecture is exported to a sub-class:
-        config_CBM = config.CBM
         self.CBM = CBM(config)
+        if config_model.load_CBM:
+            self.CBM.load_state_dict(torch.load(config_model.CBM_dir, weights_only=True))
+
+        # Not sure whether these are going to work without bugs. But I will risk.
+        # When I artificially modified self.CBM.head, self.head got modified exactly
+        # The same way. I conclude that this should work then.
+        self.head = self.CBM.head
+        self.encoder = self.CBM.encoder
+        self.concept_predictor = self.CBM.concept_predictor
+
+        self.pred_dim = self.CBM.pred_dim
 
         # Compute covariance
         if self.cov_type in ("empirical_true", "empirical_predicted"):
@@ -78,14 +88,14 @@ class PSCBM(nn.Module):
     def forward(self, x, epoch, c_true=None, validation=False):
         return self.CBM.forward(x, epoch, c_true=c_true, validation=validation)
 
-    def intervene(self, concepts_interv_probs, concepts_mask, input_features):
+    def intervene(self, concepts_mu_intervened, concepts_mask, input_features):
         """
         This function does de facto the same as the corresponding function in regular CBM. It is however simplified,
         because autoregressive mode is not supported. (Common case: I might have called the CBM's function, but I did
-        not know it before I rewrote it.
+        not know it before I rewrote it.)
         It is of course assumed that concept correlations have already been applied to the passed probabilities.
         Args:
-            concepts_interv_probs:
+            concepts_mu_intervened: concepts LOGITS after intervention
             concepts_mask:
             input_features:
 
@@ -95,19 +105,19 @@ class PSCBM(nn.Module):
 
         if self.concept_learning == "soft":
             # Soft CBM
-            c_logit = torch.logit(concepts_interv_probs, eps=1e-6)
-            y_pred_logits = self.CBM.head(c_logit)
+            y_pred_logits = self.CBM.head(concepts_mu_intervened)
 
         elif self.concept_learning == "hard":
             y_pred_probs = 0
-            c_prob_mcmc = concepts_interv_probs.unsqueeze(-1).expand(
+            concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
+            c_prob_mcmc = concepts_probs_intervened.unsqueeze(-1).expand(
                 -1, -1, self.num_monte_carlo
             )
             c = torch.bernoulli(c_prob_mcmc)
 
             # Fix intervened-on concepts to ground truth
             c[concepts_mask == 1] = (
-                concepts_interv_probs[concepts_mask == 1]
+                concepts_probs_intervened[concepts_mask == 1]
                 .unsqueeze(-1)
                 .expand(-1, self.num_monte_carlo)
             )
@@ -135,10 +145,10 @@ class PSCBM(nn.Module):
             intermediate = self.CBM.encoder(input_features)
             c_p = [p(intermediate) for p in self.CBM.positive_embeddings]
             c_n = [n(intermediate) for n in self.CBM.negative_embeddings]
-
+            concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
             z_prob = [
-                concepts_interv_probs[:, i].unsqueeze(1) * c_p[i] +
-                (1 - concepts_interv_probs[:, i].unsqueeze(1)) * c_n[i]
+                concepts_probs_intervened[:, i].unsqueeze(1) * c_p[i] +
+                (1 - concepts_probs_intervened[:, i].unsqueeze(1)) * c_n[i]
                 for i in range(self.num_concepts)
             ]
             z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
