@@ -25,7 +25,9 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
         c_cov = model.covariance
 
     # Intervening with different strategies
-    first_intervention = True
+    # first_intervention = True
+
+    wandb.define_metric("intervention/num_concepts_intervened")
     for strategy in strategies:
         for policy in policies:
             intervention_dataset_base = []
@@ -98,11 +100,11 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
             # Calculate and log metrics
             metrics_dict = metrics.compute(validation=True, config=config)
 
-            # define which metrics will be plotted against it
-            if first_intervention:
-                # define our custom x axis metric for wandb
-                wandb.define_metric("intervention/num_concepts_intervened")
-                first_intervention = False
+            # # define which metrics will be plotted against it
+            # if first_intervention:
+            #     # define our custom x axis metric for wandb
+            #     wandb.define_metric("intervention/num_concepts_intervened")
+            #     first_intervention = False
             for i, (k, v) in enumerate(metrics_dict.items()):
                 wandb.define_metric(
                     f"intervention_{strategy}_{policy}/{k}",
@@ -145,11 +147,11 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
             # Initially: all-zeros of the shape of GT-concepts (or any other concepts vector, to be honest)
             # So the shape is: (dataset_length, num_concepts)
             concepts_dataset_mask = torch.zeros_like(intervention_dataset_fixed[-2])
+            intervention_dataset = TensorDataset(
+                *intervention_dataset_base, concepts_dataset_mask, *intervention_dataset_fixed
+            )
 
             for num_intervened in range(1, num_interventions + 1):
-                intervention_dataset = TensorDataset(
-                    *intervention_dataset_base, concepts_dataset_mask, *intervention_dataset_fixed
-                )
                 intervention_loader = DataLoader(
                     intervention_dataset,
                     batch_size=config.model.val_batch_size,
