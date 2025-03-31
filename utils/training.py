@@ -9,18 +9,17 @@ from torch import nn
 from tqdm import tqdm
 from torchmetrics import Metric
 from torchmetrics.utilities import dim_zero_cat
-import wandb
 
 from utils.metrics import calc_target_metrics, calc_concept_metrics
 from utils.plotting import compute_and_plot_heatmap
 
-def train_one_epoch_pscbm(train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device):
-    train_one_epoch_cbm(train_loader, model.CBM, optimizer, mode, metrics, epoch, config, loss_fn, device
+def train_one_epoch_pscbm(train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device, run):
+    train_one_epoch_cbm(train_loader, model.CBM, optimizer, mode, metrics, epoch, config, loss_fn, device, run
     )
     return
 
 def train_one_epoch_scbm(
-    train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device
+    train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device, run
 ):
     """
     Train the Stochastic Concept Bottleneck Model (SCBM) for one epoch.
@@ -112,7 +111,7 @@ def train_one_epoch_scbm(
 
     # Calculate and log metrics
     metrics_dict = metrics.compute()
-    wandb.log({f"train/{k}": v for k, v in metrics_dict.items()})
+    run.log({f"train/{k}": v for k, v in metrics_dict.items()})
     prints = f"Epoch {epoch + 1}, Train     : "
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "
@@ -122,7 +121,7 @@ def train_one_epoch_scbm(
 
 
 def train_one_epoch_cbm(
-    train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device
+    train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device, run
 ):
     """
     Train a baseline method for one epoch.
@@ -212,7 +211,7 @@ def train_one_epoch_cbm(
 
     # Calculate and log metrics
     metrics_dict = metrics.compute()
-    wandb.log({f"train/{k}": v for k, v in metrics_dict.items()})
+    run.log({f"train/{k}": v for k, v in metrics_dict.items()})
     prints = f"Epoch {epoch + 1}, Train     : "
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "
@@ -228,8 +227,9 @@ def validate_one_epoch_pscbm(
     config,
     loss_fn,
     device,
+    run,
     test=False,
-    concept_names_graph=None,
+    concept_names_graph=None
 ):
     validate_one_epoch_cbm(
             loader,
@@ -239,8 +239,9 @@ def validate_one_epoch_pscbm(
             config,
             loss_fn,
             device,
-            test=False,
-            concept_names_graph=None,
+            run,
+            test=test,
+            concept_names_graph=concept_names_graph,
     )
 
 
@@ -252,6 +253,7 @@ def validate_one_epoch_scbm(
     config,
     loss_fn,
     device,
+    run,
     test=False,
     concept_names_graph=None,
 ):
@@ -339,10 +341,10 @@ def validate_one_epoch_scbm(
     metrics_dict = metrics.compute(validation=True, config=config)
 
     if not test:
-        wandb.log({f"validation/{k}": v for k, v in metrics_dict.items()})
+        run.log({f"validation/{k}": v for k, v in metrics_dict.items()})
         prints = f"Epoch {epoch}, Validation: "
     else:
-        wandb.log({f"test/{k}": v for k, v in metrics_dict.items()})
+        run.log({f"test/{k}": v for k, v in metrics_dict.items()})
         prints = f"Test: "
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "
@@ -360,6 +362,7 @@ def validate_one_epoch_cbm(
     config,
     loss_fn,
     device,
+    run,
     test=False,
     concept_names_graph=None,
 ):
@@ -430,10 +433,10 @@ def validate_one_epoch_cbm(
     # Calculate and log metrics
     metrics_dict = metrics.compute(validation=True, config=config)
     if not test:
-        wandb.log({f"validation/{k}": v for k, v in metrics_dict.items()})
+        run.log({f"validation/{k}": v for k, v in metrics_dict.items()})
         prints = f"Epoch {epoch}, Validation: "
     else:
-        wandb.log({f"test/{k}": v for k, v in metrics_dict.items()})
+        run.log({f"test/{k}": v for k, v in metrics_dict.items()})
         prints = f"Test: "
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "

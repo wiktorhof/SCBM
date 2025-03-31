@@ -10,12 +10,11 @@ import torch.nn.functional as F
 from scipy.stats import chi2
 from torchmin import minimize
 from tqdm import tqdm
-import wandb
 
 from utils.minimize_constraint import minimize_constr
 from utils.utils import numerical_stability_check
 
-def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, loss_fn, device):
+def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, loss_fn, device, run):
     model.CBM.eval()
     policies = config.model.inter_policy.split(",")
     strategies = config.model.inter_strategy.split(",")
@@ -27,7 +26,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
     # Intervening with different strategies
     # first_intervention = True
 
-    wandb.define_metric("intervention/num_concepts_intervened")
+    run.define_metric("intervention/num_concepts_intervened")
     for strategy in strategies:
         for policy in policies:
             intervention_dataset_base = []
@@ -103,14 +102,14 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
             # # define which metrics will be plotted against it
             # if first_intervention:
             #     # define our custom x axis metric for wandb
-            #     wandb.define_metric("intervention/num_concepts_intervened")
+            #     run.define_metric("intervention/num_concepts_intervened")
             #     first_intervention = False
             for i, (k, v) in enumerate(metrics_dict.items()):
-                wandb.define_metric(
+                run.define_metric(
                     f"intervention_{strategy}_{policy}/{k}",
                     step_metric="intervention/num_concepts_intervened",
                 )
-                wandb.log(
+                run.log(
                     {
                         f"intervention_{strategy}_{policy}/{k}": v,
                         "intervention/num_concepts_intervened": 0,
@@ -218,7 +217,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                 metrics_dict = metrics.compute(validation=True, config=config)
                 # define which metrics will be plotted against it
                 for i, (k, v) in enumerate(metrics_dict.items()):
-                    wandb.log(
+                    run.log(
                         {
                             f"intervention_{strategy}_{policy}/{k}": v,
                             "intervention/num_concepts_intervened": num_intervened,
@@ -253,7 +252,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
 
 
 def intervene_scbm(
-    train_loader, test_loader, model, metrics, epoch, config, loss_fn, device
+    train_loader, test_loader, model, metrics, epoch, config, loss_fn, device, run
 ):
     """
     Compute the efficacy of intervening on a model using different intervention strategies and policies for SCBMs.
@@ -384,14 +383,14 @@ def intervene_scbm(
             # define which metrics will be plotted against it
             if first_intervention:
                 # define our custom x axis metric for wandb
-                wandb.define_metric("intervention/num_concepts_intervened")
+                run.define_metric("intervention/num_concepts_intervened")
                 first_intervention = False
             for i, (k, v) in enumerate(metrics_dict.items()):
-                wandb.define_metric(
+                run.define_metric(
                     f"intervention_{strategy}_{policy}/{k}",
                     step_metric="intervention/num_concepts_intervened",
                 )
-                wandb.log(
+                run.log(
                     {
                         f"intervention_{strategy}_{policy}/{k}": v,
                         "intervention/num_concepts_intervened": 0,
@@ -521,7 +520,7 @@ def intervene_scbm(
                 metrics_dict = metrics.compute(validation=True, config=config)
                 # define which metrics will be plotted against it
                 for i, (k, v) in enumerate(metrics_dict.items()):
-                    wandb.log(
+                    run.log(
                         {
                             f"intervention_{strategy}_{policy}/{k}": v,
                             "intervention/num_concepts_intervened": num_intervened,
@@ -553,7 +552,7 @@ def intervene_scbm(
 
 
 def intervene_cbm(
-    train_loader, test_loader, model, metrics, epoch, config, loss_fn, device
+    train_loader, test_loader, model, metrics, epoch, config, loss_fn, device, run
 ):
     """
     Compute the efficacy of intervening on a model using different intervention strategies and policies for baselines.
@@ -665,14 +664,14 @@ def intervene_cbm(
             # define which metrics will be plotted against it
             if first_intervention:
                 # define our custom x axis metric for wandb
-                wandb.define_metric("intervention/num_concepts_intervened")
+                run.define_metric("intervention/num_concepts_intervened")
                 first_intervention = False
             for i, (k, v) in enumerate(metrics_dict.items()):
-                wandb.define_metric(
+                run.define_metric(
                     f"intervention_{strategy}_{policy}/{k}",
                     step_metric="intervention/num_concepts_intervened",
                 )
-                wandb.log(
+                run.log(
                     {
                         f"intervention_{strategy}_{policy}/{k}": v,
                         "intervention/num_concepts_intervened": 0,
@@ -797,7 +796,7 @@ def intervene_cbm(
                 metrics_dict = metrics.compute(validation=True, config=config)
                 # define which metrics will be plotted against it
                 for i, (k, v) in enumerate(metrics_dict.items()):
-                    wandb.log(
+                    run.log(
                         {
                             f"intervention_{strategy}_{policy}/{k}": v,
                             "intervention/num_concepts_intervened": num_intervened,
