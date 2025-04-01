@@ -3,6 +3,7 @@ SCBM and baseline models.
 """
 
 import os
+from pathlib import Path
 import math
 import torch
 from torch import nn
@@ -63,7 +64,21 @@ class PSCBM(nn.Module):
         #Architecture is exported to a sub-class:
         self.CBM = CBM(config)
         if config_model.load_CBM:
-            self.CBM.load_state_dict(torch.load(config_model.CBM_dir, weights_only=True))
+            #If some exact path is specified
+            if config_model.CBM_dir:
+                CBM_dir = config_model.CBM_dir
+            #If no weights path is specified, infer it from model, concept learning and dataset information
+            else:
+                #experiment_type records information about the model, concept encoding and dataset
+                experiment_type = config.experiment_dir.parent
+                path_parts = list(experiment_type.parts)
+                for part in path_parts:
+                    if part == "pscbm":
+                        part = "cbm" #instead of pscbm as we want to load a CBM
+                experiment_type = Path(*path_parts)
+                # Get the first file that matches experiment_type and is a PyTorch file (we assume, it contains proper model weights)
+                CBM_dir = experiment_type.glob("**/*.pth").__next__()
+            self.CBM.load_state_dict(torch.load(CBM_dir, weights_only=True))
 
         # Not sure whether these are going to work without bugs. But I will risk.
         # When I artificially modified self.CBM.head, self.head got modified exactly
