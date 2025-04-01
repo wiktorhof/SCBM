@@ -68,7 +68,7 @@ def train(config):
     timestr = time.strftime("%Y%m%d-%H%M%S")
     ex_name = "{}_{}".format(str(timestr), uuid.uuid4().hex[:5])
     experiment_path = (
-        Path(config.experiment_dir) / config.model.model / config.data.dataset / ex_name
+        Path(config.experiment_dir) / config.model.model / config.model.concept_learning / config.data.dataset / ex_name
     )
     experiment_path.mkdir(parents=True)
     config.experiment_dir = str(experiment_path)
@@ -294,6 +294,7 @@ def train(config):
             model.apply(freeze_module)
             if config.save_model:
                 torch.save(model.state_dict(), join(experiment_path, "model.pth"))
+                OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
                 print("\nTRAINING FINISHED, MODEL SAVED!", flush=True)
             else:
                 print("\nTRAINING FINISHED", flush=True)
