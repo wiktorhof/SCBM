@@ -5,6 +5,7 @@ Utility methods for constructing loss functions
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from omegaconf import DictConfig
 from torch import Tensor
 from typing import Optional
 
@@ -14,7 +15,7 @@ def create_loss(config):
     Create and return a loss function based on the configuration.
 
     Args:
-        config (dict): Configuration dictionary.
+        config (DictConfig): Configuration dictionary.
 
     Returns:
         nn.Module: The loss function.
@@ -53,7 +54,7 @@ class CBLoss(nn.Module):
         num_classes: Optional[int] = 2,
         reduction: str = "mean",
         alpha: float = 1,
-        config: dict = {},
+        config: DictConfig = DictConfig(None),
     ) -> None:
         """
         Initialize the CBLoss.
@@ -75,7 +76,7 @@ class CBLoss(nn.Module):
         concepts_true: Tensor,
         target_pred_logits: Tensor,
         target_true: Tensor,
-    ) -> Tensor:
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """
         Compute the loss.
 
@@ -86,7 +87,7 @@ class CBLoss(nn.Module):
             target_true (Tensor): Ground-truth target values.
 
         Returns:
-            Tensor: Target loss, concept loss, and total loss.
+            tuple[Tensor, Tensor, Tensor]: Target loss, concept loss, and total loss.
         """
 
         concepts_loss = 0
@@ -124,7 +125,7 @@ class SCBLoss(nn.Module):
     """
 
     def __init__(
-        self, num_classes: Optional[int] = 2, alpha: float = 1, config: dict = {}
+        self, num_classes: Optional[int] = 2, alpha: float = 1, config: DictConfig = DictConfig(None)
     ) -> None:
         """
         Initialize the SCBLoss.
@@ -148,7 +149,7 @@ class SCBLoss(nn.Module):
         target_true: Tensor,
         c_triang_cov: Tensor,
         cov_not_triang=False,
-    ) -> Tensor:
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """
         Compute the loss.
 

@@ -227,7 +227,7 @@ def get_concept_groups(config):
     This is used for plotting the heatmap of the correlation matrix with the correct concept names.
 
     Args:
-        config (dict): The configuration dictionary.
+        config (DictConfig): The configuration dictionary.
 
     Returns:
         list: A list of concept names.

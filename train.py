@@ -45,7 +45,7 @@ def train(config):
 
     Parameters
     ----------
-    config: dict
+    config: DictConfig
         The config settings for training and validating as defined in configs or in the command line.
     """
     # ---------------------------------
@@ -78,6 +78,9 @@ def train(config):
     os.environ["WANDB_CACHE_DIR"] = os.path.join(
         Path(__file__).absolute().parent, "wandb", ".cache", "wandb"
     )  # S.t. on slurm, artifacts are logged to the right place
+    if config.logging.mode == "online":
+        wandb.login(key=os.environ["WANDB_API_KEY"], host=config.logging.host)
+        print ("Successfully logged in!")
     print("Cache dir:", os.environ["WANDB_CACHE_DIR"])
     with wandb.init(
         project=config.logging.project,
@@ -87,6 +90,7 @@ def train(config):
         mode=config.logging.mode,
         tags=[config.model.tag],
     ) as run:
+        print ("Run initialized")
         if config.logging.mode in ["online", "disabled"]:
             run.name = run.name.split("-")[-1] + "-" + config.experiment_name
         elif config.logging.mode == "offline":
