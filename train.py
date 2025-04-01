@@ -174,6 +174,7 @@ def train(config):
                 + ": "
                 + str(config.model.concept_learning + "\n")
             )
+            wandb.define_metric("epoch")
 
             # Pretraining autoregressive concept structure for AR baseline
             if (
@@ -299,19 +300,19 @@ def train(config):
             else:
                 print("\nTRAINING FINISHED", flush=True)
 
-        print("\nEVALUATION ON THE TEST SET:\n")
-        validate_one_epoch(
-            test_loader,
-            model,
-            metrics,
-            t_epochs,
-            config,
-            loss_fn,
-            device,
-            run,
-            test=True,
-            concept_names_graph=concept_names_graph,
-        )
+            print("\nEVALUATION ON THE TEST SET:\n")
+            validate_one_epoch(
+                test_loader,
+                model,
+                metrics,
+                t_epochs,
+                config,
+                loss_fn,
+                device,
+                run,
+                test=True,
+                concept_names_graph=concept_names_graph,
+            )
 
         # Intervention curves
         print("\nPERFORMING INTERVENTIONS:\n")

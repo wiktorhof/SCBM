@@ -9,6 +9,7 @@ from torch import nn
 from tqdm import tqdm
 from torchmetrics import Metric
 from torchmetrics.utilities import dim_zero_cat
+import wandb
 
 from utils.metrics import calc_target_metrics, calc_concept_metrics
 from utils.plotting import compute_and_plot_heatmap
@@ -111,7 +112,14 @@ def train_one_epoch_scbm(
 
     # Calculate and log metrics
     metrics_dict = metrics.compute()
-    run.log({f"train/{k}": v for k, v in metrics_dict.items()})
+    if epoch == 0:
+        for i, (k, v) in enumerate(metrics_dict.items()):
+            wandb.define_metric(f"train/{k}", step_metric="epoch")
+    log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
+    log_dict.update({"epoch": epoch + 1})
+    run.log(log_dict)
+    # run.log({f"train/{k}": v for k, v in metrics_dict.items()})
+    # run.log({"epoch": epoch + 1})
     prints = f"Epoch {epoch + 1}, Train     : "
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "
@@ -211,7 +219,12 @@ def train_one_epoch_cbm(
 
     # Calculate and log metrics
     metrics_dict = metrics.compute()
-    run.log({f"train/{k}": v for k, v in metrics_dict.items()})
+    if epoch == 0:
+        for i, (k, v) in enumerate(metrics_dict.items()):
+            wandb.define_metric(f"train/{k}", step_metric="epoch")
+    log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
+    log_dict.update({"epoch": epoch + 1})
+    run.log(log_dict)
     prints = f"Epoch {epoch + 1}, Train     : "
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "
@@ -341,10 +354,20 @@ def validate_one_epoch_scbm(
     metrics_dict = metrics.compute(validation=True, config=config)
 
     if not test:
-        run.log({f"validation/{k}": v for k, v in metrics_dict.items()})
+        if epoch == 0:
+            for (k,v) in metrics_dict.items():
+                wandb.define_metric(f"validation/{k}", step_metric="epoch")
+        log_dict = {f"validation/{k}": v for (k, v) in metrics_dict.items()}
+        log_dict.update({"epoch": epoch})
+        run.log(log_dict)
         prints = f"Epoch {epoch}, Validation: "
     else:
-        run.log({f"test/{k}": v for k, v in metrics_dict.items()})
+        if epoch == 0:
+            for (k,v) in metrics_dict.items():
+                wandb.define_metric(f"test/{k}", step_metric="epoch")
+        log_dict = {f"test/{k}": v for (k, v) in metrics_dict.items()}
+        log_dict.update({"epoch": epoch})
+        run.log(log_dict)
         prints = f"Test: "
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "
@@ -433,10 +456,20 @@ def validate_one_epoch_cbm(
     # Calculate and log metrics
     metrics_dict = metrics.compute(validation=True, config=config)
     if not test:
-        run.log({f"validation/{k}": v for k, v in metrics_dict.items()})
+        if epoch == 0:
+            for (k, v) in metrics_dict.items():
+                wandb.define_metric(f"validation/{k}", step_metric="epoch")
+        log_dict = {f"validation/{k}": v for (k, v) in metrics_dict.items()}
+        log_dict.update({"epoch": epoch})
+        run.log(log_dict)
         prints = f"Epoch {epoch}, Validation: "
     else:
-        run.log({f"test/{k}": v for k, v in metrics_dict.items()})
+        if epoch == 0:
+            for (k, v) in metrics_dict.items():
+                wandb.define_metric(f"test/{k}", step_metric="epoch")
+        log_dict = {f"test/{k}": v for (k, v) in metrics_dict.items()}
+        log_dict.update({"epoch": epoch})
+        run.log(log_dict)
         prints = f"Test: "
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "
