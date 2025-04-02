@@ -109,7 +109,7 @@ def get_data(config_base, config, gen):
     return train_loader, val_loader, test_loader
 
 
-def get_empirical_covariance(dataloader):
+def get_empirical_covariance(dataloader, ratio=1):
     """
     Compute the empirical covariance matrix of the concepts in the given dataloader.
 
@@ -126,9 +126,24 @@ def get_empirical_covariance(dataloader):
         torch.Tensor: The lower triangular form of the empirical covariance matrix.
     """
     data = []
-    for batch in dataloader:
+    tmp_dataloader = DataLoader(
+        dataloader.dataset,
+        batch_size=dataloader.batch_size,
+        shuffle=True,
+        num_workers=dataloader.num_workers,
+        pin_memory=True,
+        generator=dataloader.generator,
+        drop_last=False, # That's the actual parameter that I care about
+    )
+    data_to_load = ratio * len(tmp_dataloader.dataset)
+    loaded_data = 0
+    for batch in tmp_dataloader:
         concepts = batch["concepts"]
         data.append(concepts)
+        loaded_data += concepts.shape[0]
+        if loaded_data > data_to_load:
+            print (f"Computing empirical covariance with {loaded_data} out of total {len(tmp_dataloader.dataset)} samples.")
+            break
     data = torch.cat(data)  # Concatenate all data into a single tensor
     data_logits = torch.logit(data, eps=1e-6)
     covariance = torch.cov(data_logits.transpose(0, 1))
@@ -160,7 +175,7 @@ def get_empirical_covariance(dataloader):
     ########
     return lower_triangle, covariance
 
-def get_empirical_covariance_of_predictions(CBM_model, dataloader):
+def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1):
     """
     Compute the empirical covariance matrix of the concept logits predicted by CBM_model from features in dataloader.
 
@@ -178,11 +193,28 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader):
     CBM_model.eval()
     with torch.no_grad():
         data = []
-        for batch in dataloader:
+        tmp_dataloader = DataLoader(
+            dataloader.dataset,
+            batch_size=dataloader.batch_size,
+            shuffle=True,
+            num_workers=dataloader.num_workers,
+            pin_memory=True,
+            generator=dataloader.generator,
+            drop_last=False, # That's the actual parameter that I care about
+        )
+        data_to_load = ratio * len(tmp_dataloader.dataset)
+        loaded_data = 0
+
+        for batch in tmp_dataloader:
             features = batch["features"]
             # Calculate concept logits with CBM_model
             c_logits = CBM_model.concept_predictor(CBM_model.encoder(features))
             data.append(c_logits)
+            loaded_data += c_logits.shape[0]
+            if loaded_data > data_to_load:
+                print(
+                    f"Computing empirical covariance with {loaded_data} out of total {len(tmp_dataloader.dataset)} samples.")
+                break
         data = torch.cat(data)  # Concatenate all data into a single tensor
         covariance = torch.cov(data.transpose(0, 1))
 
