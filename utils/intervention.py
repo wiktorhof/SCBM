@@ -161,9 +161,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                 updated_intervention_dataset = []
 
                 with (torch.no_grad()):
-                    for k, batch in tqdm(
-                            enumerate(intervention_loader), leave=True, position=0
-                    ):
+                    for k, batch in enumerate(intervention_loader):
                         (
                             concepts_mu_interv,
                             concepts_cov_interv,
