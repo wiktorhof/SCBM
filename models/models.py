@@ -64,20 +64,25 @@ class PSCBM(nn.Module):
         #Architecture is exported to a sub-class:
         self.CBM = CBM(config)
         if config_model.load_CBM:
-            #If some exact path is specified
-            if config_model.CBM_dir:
+            # If some exact path is specified and it corresponds to an existing file and
+            # it has the correct pytorch extension, load it
+            if 'CBM_dir' in config_model.keys() and Path(config_model['CBM_dir']).is_file() and Path(
+            config_model['CBM_dir']).suffix in ('.pth', '.pt'):
                 CBM_dir = config_model.CBM_dir
-            #If no weights path is specified, infer it from model, concept learning and dataset information
+            # Otherwise, infer the path from model, concept learning and dataset information
             else:
                 #experiment_type records information about the model, concept encoding and dataset
-                experiment_type = config.experiment_dir.parent
+                experiment_type = Path(config.experiment_dir).parent
                 path_parts = list(experiment_type.parts)
-                for part in path_parts:
-                    if part == "pscbm":
-                        part = "cbm" #instead of pscbm as we want to load a CBM
+                # Replace 'pscbm' with 'cbm'
+                path_parts = ['cbm' if part == 'pscbm' else part for part in path_parts]
                 experiment_type = Path(*path_parts)
+
                 # Get the first file that matches experiment_type and is a PyTorch file (we assume, it contains proper model weights)
-                CBM_dir = experiment_type.glob("**/*.pth").__next__()
+                try:
+                    CBM_dir = experiment_type.glob("**/*.pth").__next__()
+                except StopIteration:
+                    raise FileNotFoundError("No file to load CBM weights!")
             self.CBM.load_state_dict(torch.load(CBM_dir, weights_only=True))
 
         # Not sure whether these are going to work without bugs. But I will risk.
