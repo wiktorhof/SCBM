@@ -10,13 +10,14 @@ from torch import nn
 from torch.distributions import RelaxedBernoulli, MultivariateNormal
 import torch.nn.functional as F
 from torchvision import models
+from omegaconf import DictConfig, OmegaConf
 
 from models.networks import FCNNEncoder
 from utils.training import freeze_module, unfreeze_module
 from utils.data import get_empirical_covariance
 
 
-def create_model(config):
+def create_model(config: DictConfig):
     """
     Parse the configuration file and return a relevant model
     """
@@ -29,6 +30,31 @@ def create_model(config):
     else:
         print("Could not create model with name ", config.model, "!")
         quit()
+
+def load_weights(model: nn.Module, config: DictConfig):
+    """
+
+    Args:
+        model: the model for which weights should be loaded
+        config: configuration file
+
+    Returns:
+    """
+    # If some exact path is specified, and it corresponds to an existing file, and
+    # it has the correct pytorch extension, load it
+    if 'model_dir' in config.model.keys() and Path(config.model['model_dir']).is_file() and Path(
+            config.model['model_dir']).suffix in ('.pth', '.pt'):
+        model_dir = config.model.model_dir
+    # Otherwise, infer the path from model, concept learning and dataset information
+    else:
+        # experiment_type records information about the model, concept encoding and dataset
+        experiment_type = Path(config.experiment_dir).parent
+        # Get the first file that matches experiment_type and is a PyTorch file (we assume, it contains proper model weights)
+        try:
+            model_dir = experiment_type.glob("**/*.pth").__next__()
+        except StopIteration:
+            raise FileNotFoundError("No file to load CBM weights!")
+    model.load_state_dict(torch.load(model_dir, weights_only=True))
 
 class PSCBM(nn.Module):
     """
@@ -214,7 +240,7 @@ class SCBM(nn.Module):
             Perform an intervention on the model's concept predictions.
     """
 
-    def __init__(self, config):
+    def __init__(self, config: DictConfig):
         super(SCBM, self).__init__()
 
         # Configuration arguments
@@ -308,6 +334,8 @@ class SCBM(nn.Module):
             fc1_y = nn.Linear(self.num_concepts, 256)
             fc2_y = nn.Linear(256, self.pred_dim)
             self.head = nn.Sequential(fc1_y, nn.ReLU(), fc2_y)
+        if config_model.get("load_weights", False):
+            load_weights(self, config)
 
     def forward(self, x, epoch, validation=False, return_full=False, c_true=None):
         """
@@ -483,7 +511,7 @@ class CBM(nn.Module):
         curr_temp (float): The current temperature for the Gumbel-Softmax distribution.
     """
 
-    def __init__(self, config):
+    def __init__(self, config: DictConfig):
         super(CBM, self).__init__()
 
         # Configuration arguments
@@ -602,6 +630,8 @@ class CBM(nn.Module):
             fc1_y = nn.Linear(self.concept_dim, 256)
             fc2_y = nn.Linear(256, self.pred_dim)
             self.head = nn.Sequential(fc1_y, nn.ReLU(), fc2_y)
+        if config.model.get("load_weights", False):
+            load_weights(self, config)
 
     def forward(
         self,
