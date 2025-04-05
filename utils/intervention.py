@@ -207,9 +207,9 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             )
 
                             updated_intervention_dataset.append([
-                                concepts_mu_interv,
-                                concepts_cov_interv,
-                                concepts_mask,
+                                concepts_mu_interv.cpu(),
+                                concepts_cov_interv.cpu(),
+                                concepts_mask.cpu(),
                                                                  ])
                 # Calculate and log metrics
                 metrics_dict = metrics.compute(validation=True, config=config)
