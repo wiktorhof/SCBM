@@ -166,9 +166,16 @@ def train(config):
             train_one_epoch = train_one_epoch_pscbm
             intervene = intervene_pscbm
 
-        if config.model.model == "pscbm" and config.model.load_CBM and config.model.cov_type in ("empirical_true", "empirical_predicted"):
+        # if config.model.model == "pscbm" and config.model.load_CBM and config.model.cov_type in ("empirical_true", "empirical_predicted"):
+        #     print(
+        #         "USING a pretrained CBM. No training is performed."
+        #     )
+        message = f"Using the following model type:{model.__class__.__name__} with {config.model.concept_learning} concept learning"
+        message += f" and {config.model.cov_type} covariance." if "cov_type" in config.model.keys() else "."
+        print(message)
+        if config.model.get("load_weights", False):
             print(
-                "USING a pretrained CBM. No training is performed."
+                "Pretrained weights have been loaded. No training. Only interventions."
             )
         else:
             print(
