@@ -306,7 +306,7 @@ class SCBM(nn.Module):
             self.sigma_concepts = nn.Parameter(
                 torch.zeros(int(self.num_concepts * (self.num_concepts + 1) / 2))
             )  # Predict lower triangle of concept covariance
-        elif self.cov_type == "empirical":
+        elif self.cov_type in ("empirical", "empirical_true"):
             self.sigma_concepts = torch.zeros(
                 int(self.num_concepts * (self.num_concepts + 1) / 2)
             )
