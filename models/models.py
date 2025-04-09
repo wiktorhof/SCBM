@@ -55,6 +55,7 @@ def load_weights(model: nn.Module, config: DictConfig):
         except StopIteration:
             raise FileNotFoundError("No file to load CBM weights!")
     model.load_state_dict(torch.load(model_dir, weights_only=True))
+    print(f"Loaded model weights from {model_dir}.\n")
 
 class PSCBM(nn.Module):
     """
@@ -110,6 +111,7 @@ class PSCBM(nn.Module):
                 except StopIteration:
                     raise FileNotFoundError("No file to load CBM weights!")
             self.CBM.load_state_dict(torch.load(CBM_dir, weights_only=True))
+            print(f"Loaded CBM weights from {CBM_dir}.\n")
 
         # Not sure whether these are going to work without bugs. But I will risk.
         # When I artificially modified self.CBM.head, self.head got modified exactly

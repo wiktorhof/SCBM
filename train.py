@@ -170,7 +170,7 @@ def train(config):
         #     print(
         #         "USING a pretrained CBM. No training is performed."
         #     )
-        message = f"Using the following model type:{model.__class__.__name__} with {config.model.concept_learning} concept learning"
+        message = f"Using the following model type: {model.__class__.__name__} with {config.model.concept_learning} concept learning"
         message += f" and {config.model.cov_type} covariance." if "cov_type" in config.model.keys() else "."
         print(message)
         if config.model.get("load_weights", False):
