@@ -1151,9 +1151,8 @@ class PSCBM_Strategy:
             # Move intervened covariance back to original order. A slightly different method than
             # in mu, is more straight=forward for 2D tensors
             perm_cov[:, num_intervened:, num_intervened:] = perm_interv_cov
-            interv_cov = (perm_cov.gather(1, indices_reversed.unsqueeze(1).expand(-1, perm_cov.shape[1], -1)).
-                          gather(2, indices_reversed.unsqueeze(2).expand(-1, -1, perm_cov.shape[2])))
-
+            interv_cov = perm_cov.gather(1, indices_reversed.unsqueeze(2).expand(-1,-1, perm_cov.size(2)))
+            interv_cov = interv_cov.gather(2, indices_reversed.unsqueeze(1).expand(-1, perm_cov.size(1), -1))
         assert (
             (mcmc_logits.isnan()).any()
             == (interv_mu.isnan()).any()
