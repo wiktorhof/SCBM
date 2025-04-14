@@ -548,7 +548,8 @@ class CBM(nn.Module):
                 torch.load(
                     os.path.join(
                         config_model.model_directory, "resnet/resnet18-5c106cde.pth"
-                    )
+                    ), 
+                    weights_only=True
                 )
             )
             n_features = self.encoder_res.fc.in_features
@@ -632,7 +633,7 @@ class CBM(nn.Module):
             fc1_y = nn.Linear(self.concept_dim, 256)
             fc2_y = nn.Linear(256, self.pred_dim)
             self.head = nn.Sequential(fc1_y, nn.ReLU(), fc2_y)
-        if config.model.get("load_weights", False):
+        if config.model.get("load_weights", False) and config.model.model != 'pscbm':
             load_weights(self, config)
 
     def forward(

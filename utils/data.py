@@ -125,6 +125,7 @@ def get_empirical_covariance(dataloader, ratio=1):
     Returns:
         torch.Tensor: The lower triangular form of the empirical covariance matrix.
     """
+    print("Computing empirical covariance")
     data = []
     tmp_dataloader = DataLoader(
         dataloader.dataset,
@@ -135,16 +136,19 @@ def get_empirical_covariance(dataloader, ratio=1):
         generator=dataloader.generator,
         drop_last=False, # That's the actual parameter that I care about
     )
+    #print("Temporary dataloader created")
     data_to_load = ratio * len(tmp_dataloader.dataset)
     loaded_data = 0
     for batch in tmp_dataloader:
         concepts = batch["concepts"]
         data.append(concepts)
         loaded_data += concepts.shape[0]
+        #print(f"{loaded_data}/{data_to_load}")
         if loaded_data > data_to_load:
             print (f"Computing empirical covariance with {loaded_data} out of total {len(tmp_dataloader.dataset)} samples.")
             break
     data = torch.cat(data)  # Concatenate all data into a single tensor
+    #print("Loaded all data")
     data_logits = torch.logit(data, eps=1e-6)
     covariance = torch.cov(data_logits.transpose(0, 1))
 
