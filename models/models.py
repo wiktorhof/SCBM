@@ -54,7 +54,7 @@ def load_weights(model: nn.Module, config: DictConfig):
             model_dir = experiment_type.glob("**/*.pth").__next__()
         except StopIteration:
             raise FileNotFoundError("No file to load CBM weights!")
-    model.load_state_dict(torch.load(model_dir, weights_only=True))
+    model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
     print(f"Loaded model weights from {model_dir}.\n")
 
 class PSCBM(nn.Module):
@@ -90,7 +90,7 @@ class PSCBM(nn.Module):
 
         #Architecture is exported to a sub-class:
         self.CBM = CBM(config)
-        if config_model.load_CBM:
+        if config.get('load_weights', False):
             # If some exact path is specified and it corresponds to an existing file and
             # it has the correct pytorch extension, load it
             if 'CBM_dir' in config_model.keys() and Path(config_model['CBM_dir']).is_file() and Path(
@@ -110,7 +110,7 @@ class PSCBM(nn.Module):
                     CBM_dir = experiment_type.glob("**/*.pth").__next__()
                 except StopIteration:
                     raise FileNotFoundError("No file to load CBM weights!")
-            self.CBM.load_state_dict(torch.load(CBM_dir, weights_only=True))
+            self.CBM.load_state_dict(torch.load(CBM_dir, weights_only=True, map_location=torch.device('cpu')))
             print(f"Loaded CBM weights from {CBM_dir}.\n")
 
         # Not sure whether these are going to work without bugs. But I will risk.
@@ -134,9 +134,10 @@ class PSCBM(nn.Module):
 
 
     def forward(self, x, epoch, c_true=None, validation=False):
-        return self.CBM.forward(x, epoch, c_true=c_true, validation=validation)
+        concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
+        return concepts_pred_probs, target_pred_logits, concepts
 
-    def intervene(self, concepts_mu_intervened, concepts_mask, input_features):
+    def intervene(self, concepts_intervened_probs, concepts_mask, input_features):
         """
         This function does de facto the same as the corresponding function in regular CBM. It is however simplified,
         because autoregressive mode is not supported. (Common case: I might have called the CBM's function, but I did
@@ -151,58 +152,60 @@ class PSCBM(nn.Module):
             y_pred_logits: the model's prediction after correcting the concepts.
         """
 
-        if self.concept_learning == "soft":
-            # Soft CBM
-            y_pred_logits = self.CBM.head(concepts_mu_intervened)
+        return self.CBM.intervene(concepts_intervened_probs, concepts_mask, input_features, None)
 
-        elif self.concept_learning == "hard":
-            y_pred_probs = 0
-            concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
-            c_prob_mcmc = concepts_probs_intervened.unsqueeze(-1).expand(
-                -1, -1, self.num_monte_carlo
-            )
-            c = torch.bernoulli(c_prob_mcmc)
-
-            # Fix intervened-on concepts to ground truth
-            c[concepts_mask == 1] = (
-                concepts_probs_intervened[concepts_mask == 1]
-                .unsqueeze(-1)
-                .expand(-1, self.num_monte_carlo)
-            )
-
-            for i in range(self.num_monte_carlo):
-                c_i = c[:, :, i]
-                y_pred_logits_i = self.CBM.head(c_i)
-                if self.pred_dim == 1:
-                    y_pred_probs += torch.sigmoid(
-                        y_pred_logits_i
-                    )
-                else:
-                    y_pred_probs += torch.softmax(
-                        y_pred_logits_i, dim=1
-                    )
-
-            y_pred_probs /= self.num_monte_carlo
-            if self.pred_dim == 1:
-                y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
-            else:
-                y_pred_logits = torch.log(y_pred_probs + 1e-6)
-
-        # Copy-pasted from the respective CBM function
-        elif self.concept_learning == "embedding":
-            intermediate = self.CBM.encoder(input_features)
-            c_p = [p(intermediate) for p in self.CBM.positive_embeddings]
-            c_n = [n(intermediate) for n in self.CBM.negative_embeddings]
-            concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
-            z_prob = [
-                concepts_probs_intervened[:, i].unsqueeze(1) * c_p[i] +
-                (1 - concepts_probs_intervened[:, i].unsqueeze(1)) * c_n[i]
-                for i in range(self.num_concepts)
-            ]
-            z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
-            y_pred_logits = self.head(z_prob)
-
-        return y_pred_logits
+        # if self.concept_learning == "soft":
+        #     # Soft CBM
+        #     y_pred_logits = self.CBM.head(concepts_mu_intervened)
+        #
+        # elif self.concept_learning == "hard":
+        #     y_pred_probs = 0
+        #     concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
+        #     c_prob_mcmc = concepts_probs_intervened.unsqueeze(-1).expand(
+        #         -1, -1, self.num_monte_carlo
+        #     )
+        #     c = torch.bernoulli(c_prob_mcmc)
+        #
+        #     # Fix intervened-on concepts to ground truth
+        #     c[concepts_mask == 1] = (
+        #         concepts_probs_intervened[concepts_mask == 1]
+        #         .unsqueeze(-1)
+        #         .expand(-1, self.num_monte_carlo)
+        #     )
+        #
+        #     for i in range(self.num_monte_carlo):
+        #         c_i = c[:, :, i]
+        #         y_pred_logits_i = self.CBM.head(c_i)
+        #         if self.pred_dim == 1:
+        #             y_pred_probs += torch.sigmoid(
+        #                 y_pred_logits_i
+        #             )
+        #         else:
+        #             y_pred_probs += torch.softmax(
+        #                 y_pred_logits_i, dim=1
+        #             )
+        #
+        #     y_pred_probs /= self.num_monte_carlo
+        #     if self.pred_dim == 1:
+        #         y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
+        #     else:
+        #         y_pred_logits = torch.log(y_pred_probs + 1e-6)
+        #
+        # # Copy-pasted from the respective CBM function
+        # elif self.concept_learning == "embedding":
+        #     intermediate = self.CBM.encoder(input_features)
+        #     c_p = [p(intermediate) for p in self.CBM.positive_embeddings]
+        #     c_n = [n(intermediate) for n in self.CBM.negative_embeddings]
+        #     concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
+        #     z_prob = [
+        #         concepts_probs_intervened[:, i].unsqueeze(1) * c_p[i] +
+        #         (1 - concepts_probs_intervened[:, i].unsqueeze(1)) * c_n[i]
+        #         for i in range(self.num_concepts)
+        #     ]
+        #     z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
+        #     y_pred_logits = self.head(z_prob)
+        #
+        # return y_pred_logits
 
     def freeze_c(self):
         self.CBM.head.apply(freeze_module)
@@ -336,7 +339,7 @@ class SCBM(nn.Module):
             fc1_y = nn.Linear(self.num_concepts, 256)
             fc2_y = nn.Linear(256, self.pred_dim)
             self.head = nn.Sequential(fc1_y, nn.ReLU(), fc2_y)
-        if config_model.get("load_weights", False):
+        if config.get("load_weights", False):
             load_weights(self, config)
 
     def forward(self, x, epoch, validation=False, return_full=False, c_true=None):
