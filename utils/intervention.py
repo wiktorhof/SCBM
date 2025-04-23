@@ -213,7 +213,13 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                                                                  ])
                 # Calculate and log metrics
                 metrics_dict = metrics.compute(validation=True, config=config)
-                # define which metrics will be plotted against it
+                run.log(
+                        {
+                            f"intervention_{strategy}_{policy}/concepts_covariance": concepts_cov_interv.cpu(),
+                            "intervention/num_concepts_intervened": num_intervened,
+                        }
+                    )
+               # define which metrics will be plotted against it
                 for i, (k, v) in enumerate(metrics_dict.items()):
                     run.log(
                         {
