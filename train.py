@@ -88,7 +88,7 @@ def train(config):
         entity=config.logging.entity,
         config=OmegaConf.to_container(config, resolve=True),
         mode=config.logging.mode,
-        tags=[config.model.tag],
+        tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
     ) as run:
         print ("Run initialized")
         if config.logging.mode in ["online", "disabled"]:

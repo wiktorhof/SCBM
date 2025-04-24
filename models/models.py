@@ -376,12 +376,12 @@ class SCBM(nn.Module):
         c_mu = self.mu_concepts(intermediate)
         if self.cov_type == "global":
             c_sigma = self.sigma_concepts.repeat(c_mu.size(0), 1)
-        elif self.cov_type == "empirical":
+        elif self.cov_type in ("empirical", "empirical_true"):
             c_sigma = self.sigma_concepts.unsqueeze(0).repeat(c_mu.size(0), 1, 1)
         else: # "amortized"
             c_sigma = self.sigma_concepts(intermediate)
 
-        if self.cov_type == "empirical":
+        if self.cov_type in ("empirical", "empirical_true"):
             c_triang_cov = c_sigma
         else:
             # Fill the lower triangle of the covariance matrix with the values and make diagonal positive
