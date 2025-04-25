@@ -11,6 +11,7 @@ from torch.distributions import RelaxedBernoulli, MultivariateNormal
 import torch.nn.functional as F
 from torchvision import models
 from omegaconf import DictConfig, OmegaConf
+import yaml
 
 from models.networks import FCNNEncoder
 from utils.training import freeze_module, unfreeze_module
@@ -39,23 +40,55 @@ def load_weights(model: nn.Module, config: DictConfig):
         config: configuration file
 
     Returns:
+        If a model_dir is explicitly specified in the configurations file, load weights from this file.
+        If no model_dir is specified, iterate through all weights files which correspond to the same
+        model, concept learning and dataset configuration. If there are many such files, preferably load
+        weights from one that also has a config file associated with it - one can then make sure that also
+        cov_type and learning_mode are the same.
     """
     # If some exact path is specified, and it corresponds to an existing file, and
     # it has the correct pytorch extension, load it
+    weights_loaded = False
+    model_dir=None
     if 'model_dir' in config.model.keys() and Path(config.model['model_dir']).is_file() and Path(
             config.model['model_dir']).suffix in ('.pth', '.pt'):
         model_dir = config.model.model_dir
+        model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
     # Otherwise, infer the path from model, concept learning and dataset information
     else:
         # experiment_type records information about the model, concept encoding and dataset
         experiment_type = Path(config.experiment_dir).parent
         # Get the first file that matches experiment_type and is a PyTorch file (we assume, it contains proper model weights)
-        try:
-            model_dir = experiment_type.glob("**/*.pth").__next__()
-        except StopIteration:
-            raise FileNotFoundError("No file to load CBM weights!")
-    model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
-    print(f"Loaded model weights from {model_dir}.\n")
+        # try:
+        #     model_dir = experiment_type.glob("**/*.pth").__next__()
+        # except StopIteration:
+        #     raise FileNotFoundError("No file to load CBM weights!")
+        for model_dir in experiment_type.glob("**/*.pth"):
+            """
+            I want to add additional checks here, to make sure that weights are loaded
+            from a model with the same configuration.
+            If there is a configuration file in addition to the weights file, we can compare some configurations.
+            The list might need to be expanded in the future.
+            If no configuration file is present, the file will be recorded as a last resort.
+            """
+            if model_dir.parent.join('config.yaml').is_file():
+                with open(model_dir.parent.join('config.yaml'), 'r') as file:
+                    loaded_models_config = yaml.safe_load(file)
+                if (
+                        loaded_models_config.model.get('cov_type') == config.model.get('cov_type') and
+                        loaded_models_config.model.get('training_mode') == config.model.get('training_mode')
+                ):
+                    model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
+                    print(f"Loaded model weights from {model_dir}. cov_type and training_mode have been checked "
+                          f"for concordance.\n")
+                    weights_loaded = True
+            if not weights_loaded:
+                if model_dir:
+                    model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
+                    print(f"Loaded model weights from {model_dir}. cov_type and training_mode have NOT been checked "
+                          f"for concordance.\n")
+                else:
+                    raise FileNotFoundError("No model with corresponding configuration to load weights from it.")
 
 class PSCBM(nn.Module):
     """
@@ -93,9 +126,12 @@ class PSCBM(nn.Module):
         if config.get('load_weights', False):
             # If some exact path is specified and it corresponds to an existing file and
             # it has the correct pytorch extension, load it
+            CBM_dir = None
+            message = ""
             if 'CBM_dir' in config_model.keys() and Path(config_model['CBM_dir']).is_file() and Path(
             config_model['CBM_dir']).suffix in ('.pth', '.pt'):
                 CBM_dir = config_model.CBM_dir
+                message = f"Loaded CBM weights from the file specified in configurations: {config_model['CBM_dir']}"
             # Otherwise, infer the path from model, concept learning and dataset information
             else:
                 #experiment_type records information about the model, concept encoding and dataset
@@ -105,13 +141,28 @@ class PSCBM(nn.Module):
                 path_parts = ['cbm' if part == 'pscbm' else part for part in path_parts]
                 experiment_type = Path(*path_parts)
 
-                # Get the first file that matches experiment_type and is a PyTorch file (we assume, it contains proper model weights)
-                try:
-                    CBM_dir = experiment_type.glob("**/*.pth").__next__()
-                except StopIteration:
-                    raise FileNotFoundError("No file to load CBM weights!")
+                for CBM_dir in experiment_type.glob("**/*.pth"):
+                    if CBM_dir.parent.join('config.yaml').is_file():
+                        with open(CBM_dir.parent.join('config.yaml'), 'r') as file:
+                            loaded_models_config = yaml.safe_load(file)
+                        if (
+                                # loaded_models_config.model.get('cov_type') == config.model.get('cov_type') and
+                                loaded_models_config.model.get('training_mode') == config.model.get('training_mode')
+                        ):
+                            message = f"""Loaded model weights from {CBM_dir}. training_mode has been checked
+                                for concordance.\n"""
+                            break
+
+                # Check whether a message has ben generated - equivalent to finding a verified weights file
+                if not message:
+                    if CBM_dir:
+                        message = f"""Loaded model weights from {CBM_dir}. training_mode has NOT
+                         been checked for concordance.\n"""
+                    else: # No CBM_dir has been found
+                        raise FileNotFoundError("No model with corresponding configuration to load weights from it.")
+
             self.CBM.load_state_dict(torch.load(CBM_dir, weights_only=True, map_location=torch.device('cpu')))
-            print(f"Loaded CBM weights from {CBM_dir}.\n")
+            print(message)
 
         # Not sure whether these are going to work without bugs. But I will risk.
         # When I artificially modified self.CBM.head, self.head got modified exactly
