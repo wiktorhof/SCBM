@@ -109,7 +109,7 @@ def get_data(config_base, config, gen):
     return train_loader, val_loader, test_loader
 
 
-def get_empirical_covariance(dataloader, ratio=1):
+def get_empirical_covariance(dataloader, ratio=1, scaling_factor=None):
     """
     Compute the empirical covariance matrix of the concepts in the given dataloader.
 
@@ -154,6 +154,10 @@ def get_empirical_covariance(dataloader, ratio=1):
 
     # Bringing it into lower triangular form
     covariance = numerical_stability_check(covariance, device="cpu")
+    if scaling_factor:
+        rows, cols = torch.tril_indices(row=covariance.shape[1], col=covariance.shape[1], offset=-1)
+        covariance[:, rows, cols] /= scaling_factor
+        covariance[:, cols, rows] /= scaling_factor
     lower_triangle = torch.linalg.cholesky(covariance)
 
     ####### Alternative cov computation if dataset was too large for memory
@@ -179,7 +183,7 @@ def get_empirical_covariance(dataloader, ratio=1):
     ########
     return lower_triangle, covariance
 
-def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1):
+def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1, scaling_factor=None):
     """
     Compute the empirical covariance matrix of the concept logits predicted by CBM_model from features in dataloader.
 
@@ -224,6 +228,10 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1):
 
         # Bringing it into lower triangular form
         covariance = numerical_stability_check(covariance, device="cpu")
+        if scaling_factor:
+            rows, cols = torch.tril_indices(row=covariance.shape[1], col=covariance.shape[1], offset=-1)
+            covariance[:, rows, cols] /= scaling_factor
+            covariance[:, cols, rows] /= scaling_factor
         lower_triangle = torch.linalg.cholesky(covariance)
 
     # ###### Alternative cov computation if dataset was too large for memory

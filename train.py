@@ -125,12 +125,13 @@ def train(config):
         # Initialize covariance with empirical covariance
         cov_type = config.model.get("cov_type")
         if cov_type.startswith("empirical"):
-            data_ratio = config.model["data_ratio"] if "data_ratio" in config.model.keys() else 1
+            data_ratio = config.model.get("data_ratio", 1)
+            covariance_scaling = config.model.get("covariance_scaling", None)
         if cov_type in ("empirical", "empirical_true"): # empirical_true in PSCBM is equivalent to empirical in SCBM (preserved for backward compatibility)
-            (model.sigma_concepts, model.covariance) = [t.to(device) for t in get_empirical_covariance(train_loader, ratio=data_ratio)]
+            (model.sigma_concepts, model.covariance) = [t.to(device) for t in get_empirical_covariance(train_loader, ratio=data_ratio, scaling_factor=covariance_scaling)]
         elif cov_type == "empirical_predicted": # only in the case of PSCBM
             # I suppose, the .to(device) was redundant. If the entire model is moved to device, its attributes should be as well, no?
-            (model.sigma_concepts, model.covariance) = [t.to(device) for t in get_empirical_covariance_of_predictions(model.CBM,train_loader, ratio=data_ratio)]
+            (model.sigma_concepts, model.covariance) = [t.to(device) for t in get_empirical_covariance_of_predictions(model.CBM,train_loader, ratio=data_ratio, scaling_factor=covariance_scaling)]
 
         elif cov_type == "global":
             lower_triangle = get_empirical_covariance(train_loader).to(device)
