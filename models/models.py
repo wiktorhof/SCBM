@@ -71,8 +71,8 @@ def load_weights(model: nn.Module, config: DictConfig):
             The list might need to be expanded in the future.
             If no configuration file is present, the file will be recorded as a last resort.
             """
-            if model_dir.parent.join('config.yaml').is_file():
-                with open(model_dir.parent.join('config.yaml'), 'r') as file:
+            if model_dir.parent.joinpath('config.yaml').is_file():
+                with open(model_dir.parent.joinpath('config.yaml'), 'r') as file:
                     loaded_models_config = yaml.safe_load(file)
                 if (
                         loaded_models_config.model.get('cov_type') == config.model.get('cov_type') and
@@ -142,8 +142,8 @@ class PSCBM(nn.Module):
                 experiment_type = Path(*path_parts)
 
                 for CBM_dir in experiment_type.glob("**/*.pth"):
-                    if CBM_dir.parent.join('config.yaml').is_file():
-                        with open(CBM_dir.parent.join('config.yaml'), 'r') as file:
+                    if CBM_dir.parent.joinpath('config.yaml').is_file():
+                        with open(CBM_dir.parent.joinpath('config.yaml'), 'r') as file:
                             loaded_models_config = yaml.safe_load(file)
                         if (
                                 # loaded_models_config.model.get('cov_type') == config.model.get('cov_type') and
