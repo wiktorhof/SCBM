@@ -75,8 +75,8 @@ def load_weights(model: nn.Module, config: DictConfig):
                 with open(model_dir.parent.joinpath('config.yaml'), 'r') as file:
                     loaded_models_config = yaml.safe_load(file)
                 if (
-                        loaded_models_config.model.get('cov_type') == config.model.get('cov_type') and
-                        loaded_models_config.model.get('training_mode') == config.model.get('training_mode')
+                        loaded_models_config.get('model').get('cov_type') == config.get('model').get('cov_type') and
+                        loaded_models_config.get('model').get('training_mode') == config.get('model').get('training_mode')
                 ):
                     model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
                     print(f"Loaded model weights from {model_dir}. cov_type and training_mode have been checked "
@@ -147,7 +147,7 @@ class PSCBM(nn.Module):
                             loaded_models_config = yaml.safe_load(file)
                         if (
                                 # loaded_models_config.model.get('cov_type') == config.model.get('cov_type') and
-                                loaded_models_config.model.get('training_mode') == config.model.get('training_mode')
+                                loaded_models_config.get('model').get('training_mode') == config.model.get('training_mode')
                         ):
                             message = f"""Loaded model weights from {CBM_dir}. training_mode has been checked
                                 for concordance.\n"""
