@@ -156,8 +156,8 @@ def get_empirical_covariance(dataloader, ratio=1, scaling_factor=None):
     covariance = numerical_stability_check(covariance, device="cpu")
     if scaling_factor:
         rows, cols = torch.tril_indices(row=covariance.shape[1], col=covariance.shape[1], offset=-1)
-        covariance[:, rows, cols] /= scaling_factor
-        covariance[:, cols, rows] /= scaling_factor
+        covariance[rows, cols] /= scaling_factor
+        covariance[cols, rows] /= scaling_factor
     lower_triangle = torch.linalg.cholesky(covariance)
 
     ####### Alternative cov computation if dataset was too large for memory
@@ -230,8 +230,8 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1, scal
         covariance = numerical_stability_check(covariance, device="cpu")
         if scaling_factor:
             rows, cols = torch.tril_indices(row=covariance.shape[1], col=covariance.shape[1], offset=-1)
-            covariance[:, rows, cols] /= scaling_factor
-            covariance[:, cols, rows] /= scaling_factor
+            covariance[rows, cols] /= scaling_factor
+            covariance[cols, rows] /= scaling_factor
         lower_triangle = torch.linalg.cholesky(covariance)
 
     # ###### Alternative cov computation if dataset was too large for memory
