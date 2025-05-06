@@ -183,7 +183,7 @@ def get_empirical_covariance(dataloader, ratio=1, scaling_factor=None):
     ########
     return lower_triangle, covariance
 
-def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1, scaling_factor=None):
+def get_empirical_covariance_of_predictions(model, dataloader, ratio=1, scaling_factor=None):
     """
     Compute the empirical covariance matrix of the concept logits predicted by CBM_model from features in dataloader.
 
@@ -198,7 +198,7 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1, scal
     Returns:
         torch.Tensor: The lower triangular form of the empirical covariance matrix.
     """
-    CBM_model.eval()
+    model.eval()
     with torch.no_grad():
         data = []
         tmp_dataloader = DataLoader(
@@ -216,7 +216,7 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1, scal
         for batch in tmp_dataloader:
             features = batch["features"]
             # Calculate concept logits with CBM_model
-            c_logits = CBM_model.concept_predictor(CBM_model.encoder(features))
+            c_logits,_,_ = model(features)
             data.append(c_logits)
             loaded_data += c_logits.shape[0]
             if loaded_data > data_to_load:

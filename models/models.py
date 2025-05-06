@@ -190,7 +190,7 @@ class PSCBM(nn.Module):
         concepts_pred_logits=torch.logit(concepts_pred_probs, eps=1e-6)
         return concepts_pred_logits, target_pred_logits, concepts
 
-    def intervene(self, concepts_intervened_logits, concepts_mask, input_features):
+    def intervene(self, concepts_intervened_logits, c_mask, input_features, c_true):
         """
         This function does de facto the same as the corresponding function in regular CBM. It is however simplified,
         because autoregressive mode is not supported. (Common case: I might have called the CBM's function, but I did
@@ -198,15 +198,20 @@ class PSCBM(nn.Module):
         It is of course assumed that concept correlations have already been applied to the passed probabilities.
         Args:
             concepts_mu_intervened: concepts LOGITS after intervention
-            concepts_mask:
+            c_mask:
             input_features:
+            c_true:
 
         Returns:
             y_pred_logits: the model's prediction after correcting the concepts.
         """
         concepts_intervened_probs=self.act_c(concepts_intervened_logits)
 
-        return self.CBM.intervene(concepts_intervened_probs, concepts_mask, input_features, None)
+        if self.concept_learning in ("hard", "autoregressive", "embedding"):
+            # Set intervened-on hard concepts to 0/1
+            concepts_intervened_probs = (c_true * c_mask) + concepts_intervened_probs * (1 - c_mask)
+
+        return self.CBM.intervene(concepts_intervened_probs, c_mask, input_features, None)
 
         # if self.concept_learning == "soft":
         #     # Soft CBM
