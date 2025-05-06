@@ -198,9 +198,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             concepts_pred_logits_interv = c_mcmc_logits.mean(-1)
                             concepts_pred_probs_interv = c_mcmc_probs.mean(-1)
                             c_norm = torch.norm(concepts_cov_interv) / (concepts_cov_interv.numel() ** 0.5)
-                            c_norm = torch.norm(concepts_cov_interv) / (concepts_cov_interv.numel() ** 0.5)
-                            y_pred_intervened = model.intervene(concepts_pred_logits_interv, concepts_mask, input_features)
-
+                            y_pred_intervened = model.intervene(concepts_pred_logits_interv, concepts_mask, input_features, concepts_true)
 
                             target_loss, concepts_loss, total_loss = loss_fn(concepts_pred_probs_interv, concepts_true, y_pred_intervened, target_true)
 

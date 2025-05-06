@@ -166,3 +166,5 @@ experiments/
 outputs/
 .vscode/
 multirun/
+configs/
+pretrained_networks/
