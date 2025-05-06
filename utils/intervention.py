@@ -97,6 +97,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             batch_features.cpu(),
                             concepts_true.cpu(),
                             target_true.cpu(),
+                            c_cov.cpu(),
                         ]
                     )
 
@@ -149,7 +150,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
             # The index needs to be updated if any changes to the intervention dataset are made. This is the mask of intervened-on concepts.
             # Initially: all-zeros of the shape of GT-concepts (or any other concepts vector, to be honest)
             # So the shape is: (dataset_length, num_concepts)
-            concepts_dataset_mask = torch.zeros_like(intervention_dataset_fixed[-2])
+            concepts_dataset_mask = torch.zeros_like(intervention_dataset_fixed[-3])
             intervention_dataset = TensorDataset(
                 *intervention_dataset_base, concepts_dataset_mask, *intervention_dataset_fixed
             )
@@ -175,6 +176,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             input_features,
                             concepts_true,
                             target_true,
+                            concepts_cov_original,
                         ) = [item.to(device) for item in batch]
 
                         if config.model.concept_learning == "autoregressive":
@@ -188,14 +190,16 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             # No need to condition arguments and returned values on strategy, because always PSCBM Strategy is used.
                             # It is well possible that various can be used with PSCBM
                             concepts_mu_interv, concepts_cov_interv, c_mcmc_probs, c_mcmc_logits = intervention_strategy.compute_intervention(
-                                concepts_mu_interv,
-                                concepts_cov_interv,
+                                concepts_mu_original,
+                                concepts_cov_original,
                                 concepts_true,
                                 concepts_mask,
                             )
+                            concepts_pred_logits_interv = c_mcmc_logits.mean(-1)
                             concepts_pred_probs_interv = c_mcmc_probs.mean(-1)
                             c_norm = torch.norm(concepts_cov_interv) / (concepts_cov_interv.numel() ** 0.5)
-                            y_pred_intervened = model.intervene(concepts_pred_probs_interv, concepts_mask, input_features)
+                            c_norm = torch.norm(concepts_cov_interv) / (concepts_cov_interv.numel() ** 0.5)
+                            y_pred_intervened = model.intervene(concepts_pred_logits_interv, concepts_mask, input_features)
 
 
                             target_loss, concepts_loss, total_loss = loss_fn(concepts_pred_probs_interv, concepts_true, y_pred_intervened, target_true)
@@ -1068,22 +1072,40 @@ class PSCBM_Strategy:
 
             ## Compute conditional normal distribution sample-wise
             # Permute covariance s.t. intervened-on concepts are a block at start
-            indices = torch.argsort(c_mask, dim=1, descending=True, stable=True)
-            perm_cov = c_cov.gather(
-                1, indices.unsqueeze(2).expand(-1, -1, c_cov.size(2))
-            )
-            perm_cov = perm_cov.gather(
-                2, indices.unsqueeze(1).expand(-1, c_cov.size(1), -1)
-            )
-            perm_mu = c_mu.gather(1, indices)
-            perm_c_intervened_logits = c_intervened_logits.gather(1, indices)
+            try:
+                indices = torch.argsort(c_mask, dim=1, descending=True, stable=True)
+                perm_cov = c_cov.gather(
+                    1, indices.unsqueeze(2).expand(-1, -1, c_cov.size(2))
+                )
+                perm_cov = perm_cov.gather(
+                    2, indices.unsqueeze(1).expand(-1, c_cov.size(1), -1)
+                )
+                perm_mu = c_mu.gather(1, indices)
+                perm_c_intervened_logits = c_intervened_logits.gather(1, indices)
+            except RuntimeError:
+                print(f"""
+                Shape of tensors:
+                indices: {indices.shape}
+                c_mask: {c_mask.shape}
+                c_cov: {c_cov.shape}
+                c_mu: {c_mu.shape}
+                """)
 
             # Compute mu and covariance conditioned on intervened-on concepts
             # Intermediate steps
-            perm_intermediate_cov = torch.matmul(
+            try:
+                perm_intermediate_cov = torch.matmul(
                 perm_cov[:, num_intervened:, :num_intervened],
                 torch.inverse(perm_cov[:, :num_intervened, :num_intervened]),
-            )
+                )
+            except RuntimeError:
+                print(f"""
+                        Runtime error!
+                        num_intervened: {num_intervened}
+                        perm_cov.shape: {perm_cov.shape}
+                        perm_cov: {perm_cov}
+                        """)
+
             perm_intermediate_mu = (
                 perm_c_intervened_logits[:, :num_intervened]
                 - perm_mu[:, :num_intervened]

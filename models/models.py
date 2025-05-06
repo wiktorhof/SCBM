@@ -170,12 +170,13 @@ class PSCBM(nn.Module):
         self.head = self.CBM.head
         self.encoder = self.CBM.encoder
         self.concept_predictor = self.CBM.concept_predictor
+        self.act_c = self.CBM.act_c
 
         self.pred_dim = self.CBM.pred_dim
 
         # Compute covariance
         if self.cov_type in ("empirical_true", "empirical_predicted"):
-            self.sigma_concepts = self.sigma_concepts = torch.zeros(
+            self.sigma_concepts = torch.zeros(
                 int(self.num_concepts * (self.num_concepts + 1) / 2)
             )
 
@@ -184,11 +185,12 @@ class PSCBM(nn.Module):
             raise NotImplementedError("Other covariance types are not implemented yet.")
 
 
-    def forward(self, x, epoch, c_true=None, validation=False):
+    def forward(self, x, epoch, c_true=None, validation=False, return_full=True):
         concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
-        return concepts_pred_probs, target_pred_logits, concepts
+        concepts_pred_logits=torch.logit(concepts_pred_probs, eps=1e-6)
+        return concepts_pred_logits, target_pred_logits, concepts
 
-    def intervene(self, concepts_intervened_probs, concepts_mask, input_features):
+    def intervene(self, concepts_intervened_logits, concepts_mask, input_features):
         """
         This function does de facto the same as the corresponding function in regular CBM. It is however simplified,
         because autoregressive mode is not supported. (Common case: I might have called the CBM's function, but I did
@@ -202,6 +204,7 @@ class PSCBM(nn.Module):
         Returns:
             y_pred_logits: the model's prediction after correcting the concepts.
         """
+        concepts_intervened_probs=self.act_c(concepts_intervened_logits)
 
         return self.CBM.intervene(concepts_intervened_probs, concepts_mask, input_features, None)
 
