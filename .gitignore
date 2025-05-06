@@ -166,3 +166,4 @@ experiments/
 outputs/
 .vscode/
 multirun/
+slurm_outputs/
