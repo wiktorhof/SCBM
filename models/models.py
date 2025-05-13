@@ -54,6 +54,7 @@ def load_weights(model: nn.Module, config: DictConfig):
             config.model['model_dir']).suffix in ('.pth', '.pt'):
         model_dir = config.model.model_dir
         model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
+        print(f"Model weights have been loaded from the specified file: {model_dir}.")
     # Otherwise, infer the path from model, concept learning and dataset information
     else:
         # experiment_type records information about the model, concept encoding and dataset
@@ -82,13 +83,14 @@ def load_weights(model: nn.Module, config: DictConfig):
                     print(f"Loaded model weights from {model_dir}. cov_type and training_mode have been checked "
                           f"for concordance.\n")
                     weights_loaded = True
-            if not weights_loaded:
-                if model_dir:
-                    model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
-                    print(f"Loaded model weights from {model_dir}. cov_type and training_mode have NOT been checked "
-                          f"for concordance.\n")
-                else:
-                    raise FileNotFoundError("No model with corresponding configuration to load weights from it.")
+                    break
+        if not weights_loaded:
+            if model_dir:
+                model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
+                print(f"Loaded model weights from {model_dir}. cov_type and training_mode have NOT been checked "
+                        f"for concordance.\n")
+            else:
+                raise FileNotFoundError("No model with corresponding configuration to load weights from it.")
 
 class PSCBM(nn.Module):
     """
@@ -123,7 +125,7 @@ class PSCBM(nn.Module):
 
         #Architecture is exported to a sub-class:
         self.CBM = CBM(config)
-        if config.get('load_weights', False):
+        if config_model.get('load_weights', False):
             # If some exact path is specified and it corresponds to an existing file and
             # it has the correct pytorch extension, load it
             CBM_dir = None
@@ -175,7 +177,7 @@ class PSCBM(nn.Module):
         self.pred_dim = self.CBM.pred_dim
 
         # Compute covariance
-        if self.cov_type in ("empirical_true", "empirical_predicted"):
+        if self.cov_type in ("identity", "empirical_true", "empirical_predicted", "empirical"):
             self.sigma_concepts = torch.zeros(
                 int(self.num_concepts * (self.num_concepts + 1) / 2)
             )
@@ -187,8 +189,8 @@ class PSCBM(nn.Module):
 
     def forward(self, x, epoch, c_true=None, validation=False, return_full=True):
         concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
-        concepts_pred_logits=torch.logit(concepts_pred_probs, eps=1e-6)
-        return concepts_pred_logits, target_pred_logits, concepts
+        # concepts_pred_logits=torch.logit(concepts_pred_probs, eps=1e-6)
+        return concepts_pred_probs, target_pred_logits, concepts
 
     def intervene(self, concepts_intervened_logits, c_mask, input_features, c_true):
         """
@@ -398,7 +400,7 @@ class SCBM(nn.Module):
             fc1_y = nn.Linear(self.num_concepts, 256)
             fc2_y = nn.Linear(256, self.pred_dim)
             self.head = nn.Sequential(fc1_y, nn.ReLU(), fc2_y)
-        if config.get("load_weights", False):
+        if config_model.get("load_weights", False):
             load_weights(self, config)
 
     def forward(self, x, epoch, validation=False, return_full=False, c_true=None):

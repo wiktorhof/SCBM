@@ -331,17 +331,17 @@ def train(config):
                 test=True,
                 concept_names_graph=concept_names_graph,
             )
-        # indices = list(range(test_loader.batch_size))
-        # debug_dataset = Subset(test_loader.dataset, indices)
-        # debug_loader = DataLoader(
-        #     debug_dataset, batch_size=test_loader.batch_size, 
-        #     num_workers=test_loader.num_workers, pin_memory=True, 
-        #     generator=test_loader.generator
-        #     )
+        indices = list(range(test_loader.batch_size))
+        debug_dataset = Subset(test_loader.dataset, indices)
+        debug_loader = DataLoader(
+            debug_dataset, batch_size=test_loader.batch_size, 
+            num_workers=test_loader.num_workers, pin_memory=True, 
+            generator=test_loader.generator
+            )
         # Intervention curves
         print("\nPERFORMING INTERVENTIONS:\n")
         intervene(
-            train_loader, test_loader, model, metrics, t_epochs, config, loss_fn, device, run
+            train_loader, debug_loader, model, metrics, t_epochs, config, loss_fn, device, run
         )
     return None
 

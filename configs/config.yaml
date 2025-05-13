@@ -7,5 +7,6 @@ save_model: True # Whether to save the model. Set to True for inspecting models 
 
 logging:
   project: 'PSCBM' # Name of the wandb project
-  mode: 'disabled' # Whether to log to wandb [online, offline, disabled]
-  entity: "your_entity" # Your wandb entity
+  mode: 'online' # Whether to log to wandb [online, offline, disabled]
+  entity: "wiktorh" # Your wandb entity
+  host: "http://wandb-vogtlab.leomed.ethz.ch:46766"
