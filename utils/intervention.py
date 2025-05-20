@@ -22,8 +22,8 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
     strategies = config.model.inter_strategy.split(",")
     num_interventions = min(config.data.num_interventions, config.data.num_concepts)
 
-    if model.cov_type in ("empirical_true", "empirical_predicted"):
-        c_cov = model.covariance
+    # if model.cov_type in ("empirical_true", "empirical_predicted"):
+    #     c_cov = model.covariance
 
     # Intervening with different strategies
     # first_intervention = True
@@ -176,7 +176,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                 with torch.no_grad():
                     for k, batch in enumerate(intervention_loader):
                         (
-                            concepts_mu_interv,
+                            concepts_pred_probs,
                             concepts_cov_interv,
                             concepts_mask,
                             concepts_mu_original,
@@ -196,7 +196,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                         else:
                             #There are 2 policies now. Random only takes the mask as input, Prob_Uncertainty takes the mask and the predicted probabilities.
                             concepts_mask = intervention_policy.compute_intervention_mask(
-                            concepts_mask, concepts_pred_probs=model.act_c(concepts_mu_interv))
+                            concepts_mask, concepts_pred_probs=concepts_pred_probs)
 
                             # Good. Here I have concept probabilities after the intervention.
                             # No need to condition arguments and returned values on strategy, because always PSCBM Strategy is used.
@@ -227,7 +227,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             )
 
                             updated_intervention_dataset.append([
-                                concepts_mu_interv.cpu(),
+                                concepts_pred_probs_interv.cpu(),
                                 concepts_cov_interv.cpu(),
                                 concepts_mask.cpu(),
                                                                  ])
@@ -1126,24 +1126,29 @@ class PSCBM_Strategy:
             # Compute mu and covariance conditioned on intervened-on concepts
             # Intermediate steps
         
-            perm_intermediate_cov = torch.matmul(
-            perm_cov[:, num_intervened:, :num_intervened],
-            torch.inverse(perm_cov[:, :num_intervened, :num_intervened]),
+            # Compute mu and covariance conditioned on intervened-on concepts
+            # Intermediate steps
+            interv_concepts = slice(0, num_intervened)
+            non_interv_concepts = slice(num_intervened, None)
+            perm_interv_cov = torch.matmul(
+                perm_cov[:, non_interv_concepts, interv_concepts], 
+                torch.linalg.solve(
+                    perm_cov[:, interv_concepts, interv_concepts],
+                    perm_cov[:, interv_concepts, non_interv_concepts],
+                )
             )
-            
             perm_intermediate_mu = (
-                perm_c_intervened_logits[:, :num_intervened]
-                - perm_mu[:, :num_intervened]
+                perm_c_intervened_logits[:, interv_concepts]
+                - perm_mu[:, interv_concepts]
             )
             # Mu and Cov
             perm_interv_mu = perm_mu[:, num_intervened:] + torch.matmul(
-                perm_intermediate_cov, perm_intermediate_mu.unsqueeze(-1)
+                perm_cov[:, non_interv_concepts, interv_concepts],
+                torch.linalg.solve(
+                    perm_cov[:, interv_concepts, interv_concepts], perm_intermediate_mu.unsqueeze(-1)
+                )
             ).squeeze(-1)
-            perm_interv_cov = perm_cov[
-                :, num_intervened:, num_intervened:
-            ] - torch.matmul(
-                perm_intermediate_cov, perm_cov[:, :num_intervened, num_intervened:]
-            )
+
 
             # Adjust for floating point errors in the covariance computation to keep it symmetric
             perm_interv_cov = numerical_stability_check(

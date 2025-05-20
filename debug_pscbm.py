@@ -171,7 +171,7 @@ def train(config):
             train_one_epoch = train_one_epoch_pscbm
             intervene = intervene_pscbm
 
-        # if config.model.model == "pscbm" and config.model.load_CBM and config.model.cov_type in ("empirical_true", "empirical_predicted"):
+        # if config.model.model == "pscbm" and config.model.load_weights and config.model.cov_type in ("empirical_true", "empirical_predicted"):
         #     print(
         #         "USING a pretrained CBM. No training is performed."
         #     )

@@ -137,16 +137,18 @@ def get_empirical_covariance(dataloader, ratio=1, scaling_factor=None):
         drop_last=False, # That's the actual parameter that I care about
     )
     #print("Temporary dataloader created")
-    data_to_load = ratio * len(tmp_dataloader.dataset)
+    data_to_load = int(ratio * len(tmp_dataloader.dataset))
     loaded_data = 0
     for batch in tmp_dataloader:
         concepts = batch["concepts"]
-        data.append(concepts)
         loaded_data += concepts.shape[0]
         #print(f"{loaded_data}/{data_to_load}")
         if loaded_data > data_to_load:
-            print (f"Computing empirical covariance with {loaded_data} out of total {len(tmp_dataloader.dataset)} samples.")
+            excess = loaded_data-data_to_load
+            data.append(concepts[:-excess])
+            print (f"Computing empirical covariance with {loaded_data-excess} out of total {len(tmp_dataloader.dataset)} samples.")
             break
+        data.append(concepts)
     data = torch.cat(data)  # Concatenate all data into a single tensor
     #print("Loaded all data")
     data_logits = torch.logit(data, eps=1e-6)
@@ -210,19 +212,21 @@ def get_empirical_covariance_of_predictions(model, dataloader, ratio=1, scaling_
             generator=dataloader.generator,
             drop_last=False, # That's the actual parameter that I care about
         )
-        data_to_load = ratio * len(tmp_dataloader.dataset)
+        data_to_load = int(ratio * len(tmp_dataloader.dataset))
         loaded_data = 0
 
         for batch in tmp_dataloader:
             features = batch["features"]
             # Calculate concept logits with CBM_model
             c_logits,_,_ = model(features)
-            data.append(c_logits)
             loaded_data += c_logits.shape[0]
             if loaded_data > data_to_load:
+                excess = loaded_data - data_to_load
+                data.append(c_logits[:-excess])
                 print(
-                    f"Computing empirical covariance with {loaded_data} out of total {len(tmp_dataloader.dataset)} samples.")
+                    f"Computing empirical covariance with {loaded_data-excess} out of total {len(tmp_dataloader.dataset)} samples.")
                 break
+            data.append(c_logits)
         data = torch.cat(data)  # Concatenate all data into a single tensor
         covariance = torch.cov(data.transpose(0, 1))
 
