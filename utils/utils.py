@@ -45,7 +45,7 @@ def numerical_stability_check(cov, device, epsilon=1e-6):
         try:
             # Attempt Cholesky decomposition; if it fails, the matrix is not positive definite
             torch.linalg.cholesky(cov)
-            if num_added > 0.000001:
+            if num_added > 0.0001:
                 print(
                     "Added {} to the diagonal of the covariance matrix.".format(
                         num_added
