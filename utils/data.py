@@ -108,8 +108,33 @@ def get_data(config_base, config, gen):
 
     return train_loader, val_loader, test_loader
 
+def make_full_rank(covariance, condition_number=None):
+    """
+    Make the covariance matrix full rank by increasing its smallest singular values. This function has the additional effect of controlling the condition number of the covariance matrix.
+    This is important for numerical stability when computing the Cholesky decomposition.
 
-def get_empirical_covariance(dataloader, ratio=1):
+    Args:
+        covariance (torch.Tensor): The covariance matrix.
+
+    Returns:
+        torch.Tensor: The modified covariance matrix with full rank.
+    """
+    # Add a small value to the diagonal to make it full rank
+    if not condition_number:
+        # If condition number is not provided, make it 1/sqrt(eps) where eps is the machine epsilon for the data type of the covariance matrix. 
+        # This value is suggested by the internet.
+        condition_number = torch.reciprocal(torch.sqrt(torch.tensor((torch.finfo(covariance.dtype).eps))))
+    U, S, Vh = torch.linalg.svd(covariance)
+    if (S[0] / S[-1]) > condition_number:
+        # If the condition number is too large, set the smallest singular value to a fraction of the largest singular value
+        S2 = S.clamp(min=S[0] / condition_number)
+        num_changed = (~torch.isclose(S2, S)).sum()
+        print(f"The covariance matrix is ill-conditioned. {num_changed} smallest singular values have been clamped at {S[0]/condition_number}.")
+        covariance = U @ torch.diag(S2) @ Vh
+        
+    return covariance
+
+def get_empirical_covariance(dataloader, ratio=1, scaling_factor=None):
     """
     Compute the empirical covariance matrix of the concepts in the given dataloader.
 
@@ -137,23 +162,30 @@ def get_empirical_covariance(dataloader, ratio=1):
         drop_last=False, # That's the actual parameter that I care about
     )
     #print("Temporary dataloader created")
-    data_to_load = ratio * len(tmp_dataloader.dataset)
+    data_to_load = int(ratio * len(tmp_dataloader.dataset))
     loaded_data = 0
     for batch in tmp_dataloader:
         concepts = batch["concepts"]
-        data.append(concepts)
         loaded_data += concepts.shape[0]
         #print(f"{loaded_data}/{data_to_load}")
         if loaded_data > data_to_load:
-            print (f"Computing empirical covariance with {loaded_data} out of total {len(tmp_dataloader.dataset)} samples.")
+            excess = loaded_data-data_to_load
+            data.append(concepts[:-excess])
+            print (f"Computing empirical covariance with {loaded_data-excess} out of total {len(tmp_dataloader.dataset)} samples.")
             break
+        data.append(concepts)
     data = torch.cat(data)  # Concatenate all data into a single tensor
     #print("Loaded all data")
     data_logits = torch.logit(data, eps=1e-6)
     covariance = torch.cov(data_logits.transpose(0, 1))
 
     # Bringing it into lower triangular form
+    if scaling_factor:
+        rows, cols = torch.tril_indices(row=covariance.shape[1], col=covariance.shape[1], offset=-1)
+        covariance[rows, cols] /= scaling_factor
+        covariance[cols, rows] /= scaling_factor
     covariance = numerical_stability_check(covariance, device="cpu")
+    # covariance = make_full_rank(covariance)
     lower_triangle = torch.linalg.cholesky(covariance)
 
     ####### Alternative cov computation if dataset was too large for memory
@@ -179,7 +211,7 @@ def get_empirical_covariance(dataloader, ratio=1):
     ########
     return lower_triangle, covariance
 
-def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1):
+def get_empirical_covariance_of_predictions(model, dataloader, ratio=1, scaling_factor=None):
     """
     Compute the empirical covariance matrix of the concept logits predicted by CBM_model from features in dataloader.
 
@@ -194,7 +226,7 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1):
     Returns:
         torch.Tensor: The lower triangular form of the empirical covariance matrix.
     """
-    CBM_model.eval()
+    model.eval()
     with torch.no_grad():
         data = []
         tmp_dataloader = DataLoader(
@@ -206,24 +238,31 @@ def get_empirical_covariance_of_predictions(CBM_model, dataloader, ratio=1):
             generator=dataloader.generator,
             drop_last=False, # That's the actual parameter that I care about
         )
-        data_to_load = ratio * len(tmp_dataloader.dataset)
+        data_to_load = int(ratio * len(tmp_dataloader.dataset))
         loaded_data = 0
 
         for batch in tmp_dataloader:
             features = batch["features"]
             # Calculate concept logits with CBM_model
-            c_logits = CBM_model.concept_predictor(CBM_model.encoder(features))
-            data.append(c_logits)
+            c_logits,_,_ = model(features, 300, validation=True)
             loaded_data += c_logits.shape[0]
             if loaded_data > data_to_load:
+                excess = loaded_data - data_to_load
+                data.append(c_logits[:-excess])
                 print(
-                    f"Computing empirical covariance with {loaded_data} out of total {len(tmp_dataloader.dataset)} samples.")
+                    f"Computing empirical covariance with {loaded_data-excess} out of total {len(tmp_dataloader.dataset)} samples.")
                 break
+            data.append(c_logits)
         data = torch.cat(data)  # Concatenate all data into a single tensor
         covariance = torch.cov(data.transpose(0, 1))
 
         # Bringing it into lower triangular form
+        if scaling_factor:
+            rows, cols = torch.tril_indices(row=covariance.shape[1], col=covariance.shape[1], offset=-1)
+            covariance[rows, cols] /= scaling_factor
+            covariance[cols, rows] /= scaling_factor
         covariance = numerical_stability_check(covariance, device="cpu")
+        # covariance = make_full_rank(covariance)
         lower_triangle = torch.linalg.cholesky(covariance)
 
     # ###### Alternative cov computation if dataset was too large for memory

@@ -11,6 +11,7 @@ from torch.distributions import RelaxedBernoulli, MultivariateNormal
 import torch.nn.functional as F
 from torchvision import models
 from omegaconf import DictConfig, OmegaConf
+import yaml
 
 from models.networks import FCNNEncoder
 from utils.training import freeze_module, unfreeze_module
@@ -39,23 +40,57 @@ def load_weights(model: nn.Module, config: DictConfig):
         config: configuration file
 
     Returns:
+        If a model_dir is explicitly specified in the configurations file, load weights from this file.
+        If no model_dir is specified, iterate through all weights files which correspond to the same
+        model, concept learning and dataset configuration. If there are many such files, preferably load
+        weights from one that also has a config file associated with it - one can then make sure that also
+        cov_type and learning_mode are the same.
     """
     # If some exact path is specified, and it corresponds to an existing file, and
     # it has the correct pytorch extension, load it
+    weights_loaded = False
+    model_dir=None
     if 'model_dir' in config.model.keys() and Path(config.model['model_dir']).is_file() and Path(
             config.model['model_dir']).suffix in ('.pth', '.pt'):
         model_dir = config.model.model_dir
+        model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
+        print(f"Model weights have been loaded from the specified file: {model_dir}.")
     # Otherwise, infer the path from model, concept learning and dataset information
     else:
         # experiment_type records information about the model, concept encoding and dataset
         experiment_type = Path(config.experiment_dir).parent
         # Get the first file that matches experiment_type and is a PyTorch file (we assume, it contains proper model weights)
-        try:
-            model_dir = experiment_type.glob("**/*.pth").__next__()
-        except StopIteration:
-            raise FileNotFoundError("No file to load CBM weights!")
-    model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
-    print(f"Loaded model weights from {model_dir}.\n")
+        # try:
+        #     model_dir = experiment_type.glob("**/*.pth").__next__()
+        # except StopIteration:
+        #     raise FileNotFoundError("No file to load CBM weights!")
+        for model_dir in experiment_type.glob("**/*.pth"):
+            """
+            I want to add additional checks here, to make sure that weights are loaded
+            from a model with the same configuration.
+            If there is a configuration file in addition to the weights file, we can compare some configurations.
+            The list might need to be expanded in the future.
+            If no configuration file is present, the file will be recorded as a last resort.
+            """
+            if model_dir.parent.joinpath('config.yaml').is_file():
+                with open(model_dir.parent.joinpath('config.yaml'), 'r') as file:
+                    loaded_models_config = yaml.safe_load(file)
+                if (
+                        loaded_models_config.get('model').get('cov_type') == config.get('model').get('cov_type') and
+                        loaded_models_config.get('model').get('training_mode') == config.get('model').get('training_mode')
+                ):
+                    model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
+                    print(f"Loaded model weights from {model_dir}. cov_type and training_mode have been checked "
+                          f"for concordance.\n")
+                    weights_loaded = True
+                    break
+        if not weights_loaded:
+            if model_dir:
+                model.load_state_dict(torch.load(model_dir, weights_only=True, map_location=torch.device('cpu')))
+                print(f"Loaded model weights from {model_dir}. cov_type and training_mode have NOT been checked "
+                        f"for concordance.\n")
+            else:
+                raise FileNotFoundError("No model with corresponding configuration to load weights from it.")
 
 class PSCBM(nn.Module):
     """
@@ -90,12 +125,15 @@ class PSCBM(nn.Module):
 
         #Architecture is exported to a sub-class:
         self.CBM = CBM(config)
-        if config_model.load_CBM:
+        if config_model.get('load_weights', False):
             # If some exact path is specified and it corresponds to an existing file and
             # it has the correct pytorch extension, load it
+            CBM_dir = None
+            message = ""
             if 'CBM_dir' in config_model.keys() and Path(config_model['CBM_dir']).is_file() and Path(
             config_model['CBM_dir']).suffix in ('.pth', '.pt'):
                 CBM_dir = config_model.CBM_dir
+                message = f"Loaded CBM weights from the file specified in configurations: {config_model['CBM_dir']}"
             # Otherwise, infer the path from model, concept learning and dataset information
             else:
                 #experiment_type records information about the model, concept encoding and dataset
@@ -105,13 +143,28 @@ class PSCBM(nn.Module):
                 path_parts = ['cbm' if part == 'pscbm' else part for part in path_parts]
                 experiment_type = Path(*path_parts)
 
-                # Get the first file that matches experiment_type and is a PyTorch file (we assume, it contains proper model weights)
-                try:
-                    CBM_dir = experiment_type.glob("**/*.pth").__next__()
-                except StopIteration:
-                    raise FileNotFoundError("No file to load CBM weights!")
+                for CBM_dir in experiment_type.glob("**/*.pth"):
+                    if CBM_dir.parent.joinpath('config.yaml').is_file():
+                        with open(CBM_dir.parent.joinpath('config.yaml'), 'r') as file:
+                            loaded_models_config = yaml.safe_load(file)
+                        if (
+                                # loaded_models_config.model.get('cov_type') == config.model.get('cov_type') and
+                                loaded_models_config.get('model').get('training_mode') == config.model.get('training_mode')
+                        ):
+                            message = f"""Loaded model weights from {CBM_dir}. training_mode has been checked
+                                for concordance.\n"""
+                            break
+
+                # Check whether a message has ben generated - equivalent to finding a verified weights file
+                if not message:
+                    if CBM_dir:
+                        message = f"""Loaded model weights from {CBM_dir}. training_mode has NOT
+                         been checked for concordance.\n"""
+                    else: # No CBM_dir has been found
+                        raise FileNotFoundError("No model with corresponding configuration to load weights from it.")
+
             self.CBM.load_state_dict(torch.load(CBM_dir, weights_only=True, map_location=torch.device('cpu')))
-            print(f"Loaded CBM weights from {CBM_dir}.\n")
+            print(message)
 
         # Not sure whether these are going to work without bugs. But I will risk.
         # When I artificially modified self.CBM.head, self.head got modified exactly
@@ -119,12 +172,13 @@ class PSCBM(nn.Module):
         self.head = self.CBM.head
         self.encoder = self.CBM.encoder
         self.concept_predictor = self.CBM.concept_predictor
+        self.act_c = self.CBM.act_c
 
         self.pred_dim = self.CBM.pred_dim
 
         # Compute covariance
-        if self.cov_type in ("empirical_true", "empirical_predicted"):
-            self.sigma_concepts = self.sigma_concepts = torch.zeros(
+        if self.cov_type in ("identity", "empirical_true", "empirical_predicted", "empirical"):
+            self.sigma_concepts = torch.zeros(
                 int(self.num_concepts * (self.num_concepts + 1) / 2)
             )
 
@@ -133,10 +187,12 @@ class PSCBM(nn.Module):
             raise NotImplementedError("Other covariance types are not implemented yet.")
 
 
-    def forward(self, x, epoch, c_true=None, validation=False):
-        return self.CBM.forward(x, epoch, c_true=c_true, validation=validation)
+    def forward(self, x, epoch, c_true=None, validation=False, return_full=True):
+        concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
+        # concepts_pred_logits=torch.logit(concepts_pred_probs, eps=1e-6)
+        return concepts_pred_probs, target_pred_logits, concepts
 
-    def intervene(self, concepts_mu_intervened, concepts_mask, input_features):
+    def intervene(self, concepts_intervened_logits, c_mask, input_features, c_true):
         """
         This function does de facto the same as the corresponding function in regular CBM. It is however simplified,
         because autoregressive mode is not supported. (Common case: I might have called the CBM's function, but I did
@@ -144,65 +200,73 @@ class PSCBM(nn.Module):
         It is of course assumed that concept correlations have already been applied to the passed probabilities.
         Args:
             concepts_mu_intervened: concepts LOGITS after intervention
-            concepts_mask:
+            c_mask:
             input_features:
+            c_true:
 
         Returns:
             y_pred_logits: the model's prediction after correcting the concepts.
         """
+        concepts_intervened_probs=self.act_c(concepts_intervened_logits)
 
-        if self.concept_learning == "soft":
-            # Soft CBM
-            y_pred_logits = self.CBM.head(concepts_mu_intervened)
+        if self.concept_learning in ("hard", "autoregressive", "embedding"):
+            # Set intervened-on hard concepts to 0/1
+            concepts_intervened_probs = (c_true * c_mask) + concepts_intervened_probs * (1 - c_mask)
 
-        elif self.concept_learning == "hard":
-            y_pred_probs = 0
-            concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
-            c_prob_mcmc = concepts_probs_intervened.unsqueeze(-1).expand(
-                -1, -1, self.num_monte_carlo
-            )
-            c = torch.bernoulli(c_prob_mcmc)
+        return self.CBM.intervene(concepts_intervened_probs, c_mask, input_features, None)
 
-            # Fix intervened-on concepts to ground truth
-            c[concepts_mask == 1] = (
-                concepts_probs_intervened[concepts_mask == 1]
-                .unsqueeze(-1)
-                .expand(-1, self.num_monte_carlo)
-            )
-
-            for i in range(self.num_monte_carlo):
-                c_i = c[:, :, i]
-                y_pred_logits_i = self.CBM.head(c_i)
-                if self.pred_dim == 1:
-                    y_pred_probs += torch.sigmoid(
-                        y_pred_logits_i
-                    )
-                else:
-                    y_pred_probs += torch.softmax(
-                        y_pred_logits_i, dim=1
-                    )
-
-            y_pred_probs /= self.num_monte_carlo
-            if self.pred_dim == 1:
-                y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
-            else:
-                y_pred_logits = torch.log(y_pred_probs + 1e-6)
-
-        # Copy-pasted from the respective CBM function
-        elif self.concept_learning == "embedding":
-            intermediate = self.CBM.encoder(input_features)
-            c_p = [p(intermediate) for p in self.CBM.positive_embeddings]
-            c_n = [n(intermediate) for n in self.CBM.negative_embeddings]
-            concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
-            z_prob = [
-                concepts_probs_intervened[:, i].unsqueeze(1) * c_p[i] +
-                (1 - concepts_probs_intervened[:, i].unsqueeze(1)) * c_n[i]
-                for i in range(self.num_concepts)
-            ]
-            z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
-            y_pred_logits = self.head(z_prob)
-
-        return y_pred_logits
+        # if self.concept_learning == "soft":
+        #     # Soft CBM
+        #     y_pred_logits = self.CBM.head(concepts_mu_intervened)
+        #
+        # elif self.concept_learning == "hard":
+        #     y_pred_probs = 0
+        #     concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
+        #     c_prob_mcmc = concepts_probs_intervened.unsqueeze(-1).expand(
+        #         -1, -1, self.num_monte_carlo
+        #     )
+        #     c = torch.bernoulli(c_prob_mcmc)
+        #
+        #     # Fix intervened-on concepts to ground truth
+        #     c[concepts_mask == 1] = (
+        #         concepts_probs_intervened[concepts_mask == 1]
+        #         .unsqueeze(-1)
+        #         .expand(-1, self.num_monte_carlo)
+        #     )
+        #
+        #     for i in range(self.num_monte_carlo):
+        #         c_i = c[:, :, i]
+        #         y_pred_logits_i = self.CBM.head(c_i)
+        #         if self.pred_dim == 1:
+        #             y_pred_probs += torch.sigmoid(
+        #                 y_pred_logits_i
+        #             )
+        #         else:
+        #             y_pred_probs += torch.softmax(
+        #                 y_pred_logits_i, dim=1
+        #             )
+        #
+        #     y_pred_probs /= self.num_monte_carlo
+        #     if self.pred_dim == 1:
+        #         y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
+        #     else:
+        #         y_pred_logits = torch.log(y_pred_probs + 1e-6)
+        #
+        # # Copy-pasted from the respective CBM function
+        # elif self.concept_learning == "embedding":
+        #     intermediate = self.CBM.encoder(input_features)
+        #     c_p = [p(intermediate) for p in self.CBM.positive_embeddings]
+        #     c_n = [n(intermediate) for n in self.CBM.negative_embeddings]
+        #     concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
+        #     z_prob = [
+        #         concepts_probs_intervened[:, i].unsqueeze(1) * c_p[i] +
+        #         (1 - concepts_probs_intervened[:, i].unsqueeze(1)) * c_n[i]
+        #         for i in range(self.num_concepts)
+        #     ]
+        #     z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
+        #     y_pred_logits = self.head(z_prob)
+        #
+        # return y_pred_logits
 
     def freeze_c(self):
         self.CBM.head.apply(freeze_module)
@@ -373,12 +437,12 @@ class SCBM(nn.Module):
         c_mu = self.mu_concepts(intermediate)
         if self.cov_type == "global":
             c_sigma = self.sigma_concepts.repeat(c_mu.size(0), 1)
-        elif self.cov_type == "empirical":
+        elif self.cov_type in ("empirical", "empirical_true"):
             c_sigma = self.sigma_concepts.unsqueeze(0).repeat(c_mu.size(0), 1, 1)
         else: # "amortized"
             c_sigma = self.sigma_concepts(intermediate)
 
-        if self.cov_type == "empirical":
+        if self.cov_type in ("empirical", "empirical_true"):
             c_triang_cov = c_sigma
         else:
             # Fill the lower triangle of the covariance matrix with the values and make diagonal positive

@@ -7,7 +7,7 @@ defaults:
 model: 'cbm' # Model's name (to indicate it's a baseline)
 tag: 'baseline' # Model's tag for wandb logging
 concept_learning: 'autoregressive' # Autoregressive CBM baseline                      
-
+cov_type: None
 # --------------------------
 #         Policy
 # --------------------------

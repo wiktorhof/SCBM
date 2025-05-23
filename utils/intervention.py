@@ -2,6 +2,7 @@
 Utility functions for intervention of SCBMs and baselines.
 """
 
+import os
 import torch
 from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
@@ -10,18 +11,19 @@ import torch.nn.functional as F
 from scipy.stats import chi2
 from torchmin import minimize
 from tqdm import tqdm
+import pandas as pd
 
 from utils.minimize_constraint import minimize_constr
 from utils.utils import numerical_stability_check
 
 def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, loss_fn, device, run):
-    model.CBM.eval()
+    model.eval()
     policies = config.model.inter_policy.split(",")
     strategies = config.model.inter_strategy.split(",")
     num_interventions = min(config.data.num_interventions, config.data.num_concepts)
 
-    if model.cov_type in ("empirical_true", "empirical_predicted"):
-        c_cov = model.covariance
+    # if model.cov_type in ("empirical_true", "empirical_predicted"):
+    #     c_cov = model.covariance
 
     # Intervening with different strategies
     # first_intervention = True
@@ -41,10 +43,11 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                 print(
                     f"Intervention strategy {strategy} with policy {policy} not implemented for model {config.model.model}."
                 )
+                continue
 
 
             with torch.no_grad():
-                for (k, batch) in enumerate(tqdm(test_loader, leave=True, position=0)):
+                for k, batch in enumerate(test_loader):
                     batch_features = batch["features"].to(device)
                     concepts_true = batch["concepts"].to(device)
                     target_true = batch["labels"].to(device)
@@ -54,8 +57,8 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                         concepts_pred_probs,
                         target_pred_logits,
                         concepts, #Concepts are 0 in soft case, MCMC in hard and embeddings in embedding
-                    ) = model.CBM(batch_features, epoch, validation=True)
-
+                    ) = model(batch_features, epoch, validation=True)
+                    concepts_pred_logits = torch.logit(concepts_pred_probs, eps=1e-6)
 
                     # Calculate loss before intervention
                     target_loss, concepts_loss, total_loss = loss_fn(
@@ -64,6 +67,13 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                         target_pred_logits,
                         target_true,
                     )
+                    if model.cov_type in ("empirical_true", "empirical_predicted", "identity"):
+                        c_cov = model.covariance
+                        c_cov = numerical_stability_check(c_cov, device=device)
+                        # Add the batch dimension in the beginning
+                        c_cov = c_cov.repeat(concepts_true.shape[0], 1, 1)
+
+                    c_cov_norm = torch.norm(c_cov) / (c_cov.numel() ** 0.5)
 
                     # Store predictions
                     metrics.update(
@@ -74,25 +84,24 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                         target_pred_logits,
                         concepts_true,
                         concepts_pred_probs,
+                        cov_norm=c_cov_norm,
                     )
-
-                    if model.cov_type in ("empirical_true", "empirical_predicted"):
-                        concepts_cov = c_cov.repeat(concepts_true.shape[0], 1, 1)
 
                     intervention_dataset_base.append(
                          [
-                             concepts_pred_probs.cpu(),
-                             concepts_cov.cpu(),
+                             concepts_pred_logits.cpu(),
+                             c_cov.cpu(),
                          ]
                      )
 
                     intervention_dataset_fixed.append(
                         [
-                            concepts_pred_probs.cpu(),
+                            concepts_pred_logits.cpu(),
                             concepts.cpu(),
                             batch_features.cpu(),
                             concepts_true.cpu(),
                             target_true.cpu(),
+                            c_cov.cpu(),
                         ]
                     )
 
@@ -145,10 +154,14 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
             # The index needs to be updated if any changes to the intervention dataset are made. This is the mask of intervened-on concepts.
             # Initially: all-zeros of the shape of GT-concepts (or any other concepts vector, to be honest)
             # So the shape is: (dataset_length, num_concepts)
-            concepts_dataset_mask = torch.zeros_like(intervention_dataset_fixed[-2])
+            concepts_dataset_mask = torch.zeros_like(intervention_dataset_fixed[-3])
             intervention_dataset = TensorDataset(
                 *intervention_dataset_base, concepts_dataset_mask, *intervention_dataset_fixed
             )
+            # DEBUG:
+            # cov_list = []
+            # mu_list = []
+            # mask_list = []
 
             for num_intervened in range(1, num_interventions + 1):
                 intervention_loader = DataLoader(
@@ -160,10 +173,10 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                 # This will gather the updated values in intervention dataset, i.e. new concept values.
                 updated_intervention_dataset = []
 
-                with (torch.no_grad()):
+                with torch.no_grad():
                     for k, batch in enumerate(intervention_loader):
                         (
-                            concepts_mu_interv,
+                            concepts_pred_probs,
                             concepts_cov_interv,
                             concepts_mask,
                             concepts_mu_original,
@@ -171,27 +184,33 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             input_features,
                             concepts_true,
                             target_true,
+                            concepts_cov_original,
                         ) = [item.to(device) for item in batch]
-
+                        # DEBUG
+                        # if k == 0:
+                        #     cov_list.append(concepts_cov_interv[0].cpu())
+                        #     mu_list.append(concepts_mu_interv[0].cpu())
+                        #     mask_list.append(concepts_mask[0].cpu())
                         if config.model.concept_learning == "autoregressive":
                             raise NotImplementedError()
                         else:
                             #There are 2 policies now. Random only takes the mask as input, Prob_Uncertainty takes the mask and the predicted probabilities.
                             concepts_mask = intervention_policy.compute_intervention_mask(
-                            concepts_mask, concepts_pred_probs=concepts_mu_interv)
+                            concepts_mask, concepts_pred_probs=concepts_pred_probs)
 
                             # Good. Here I have concept probabilities after the intervention.
                             # No need to condition arguments and returned values on strategy, because always PSCBM Strategy is used.
                             # It is well possible that various can be used with PSCBM
                             concepts_mu_interv, concepts_cov_interv, c_mcmc_probs, c_mcmc_logits = intervention_strategy.compute_intervention(
-                                concepts_mu_interv,
-                                concepts_cov_interv,
+                                concepts_mu_original,
+                                concepts_cov_original,
                                 concepts_true,
                                 concepts_mask,
                             )
+                            concepts_pred_logits_interv = c_mcmc_logits.mean(-1)
                             concepts_pred_probs_interv = c_mcmc_probs.mean(-1)
-                            y_pred_intervened = model.intervene(concepts_pred_probs_interv, concepts_mask, input_features)
-
+                            c_norm = torch.norm(concepts_cov_interv) / (concepts_cov_interv.numel() ** 0.5)
+                            y_pred_intervened = model.intervene(concepts_pred_logits_interv, concepts_mask, input_features, concepts_true)
 
                             target_loss, concepts_loss, total_loss = loss_fn(concepts_pred_probs_interv, concepts_true, y_pred_intervened, target_true)
 
@@ -204,10 +223,11 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                                 y_pred_intervened,
                                 concepts_true,
                                 concepts_pred_probs_interv,
+                                cov_norm=c_norm,
                             )
 
                             updated_intervention_dataset.append([
-                                concepts_mu_interv.cpu(),
+                                concepts_pred_probs_interv.cpu(),
                                 concepts_cov_interv.cpu(),
                                 concepts_mask.cpu(),
                                                                  ])
@@ -249,6 +269,33 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                     ],
                     *intervention_dataset_fixed,
                 )
+            # DEBUG
+            # os.makedirs(f"saved_tensors/{policy}", exist_ok=True)
+            # with pd.ExcelWriter(f'saved_tensors/{policy}/covariances_scaling_{config.model.covariance_scaling}.xlsx',
+            # engine='openpyxl') as writer:
+            #     for step in [0, 20, 40, 60, 80, 100, 111]:
+            #         array = cov_list[step].numpy()
+            #         df = pd.DataFrame(array)
+            #         sheet_name = f"num_interventions_{step}"
+            #         df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+
+            # with pd.ExcelWriter(f"saved_tensors/{policy}/mu_scaling_{config.model.covariance_scaling}.xlsx",
+            # engine="openpyxl") as writer:
+            #     for step in [0, 20, 40, 60, 80, 100, 111]:
+            #         array = mu_list[step].numpy()
+            #         df = pd.DataFrame(array)
+            #         sheet_name = f"num_interventions_{step}"
+            #         df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+
+            # with pd.ExcelWriter(f"saved_tensors/{policy}/mask_scaling_{config.model.covariance_scaling}.xlsx",
+            # engine="openpyxl") as writer:
+            #     for step in [0, 20, 40, 60, 80, 100, 111]:
+            #         array = mask_list[step].numpy()
+            #         df = pd.DataFrame(array)
+            #         sheet_name = f"num_interventions_{step}"
+            #         df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
+
+
 
     return
 
@@ -287,6 +334,7 @@ def intervene_scbm(
 
     # Intervening with different strategies
     first_intervention = True
+    run.define_metric("intervention/num_concepts_intervened")
     for strategy in strategies:
 
         # Intervening with different policies
@@ -349,7 +397,7 @@ def intervene_scbm(
                         cov_norm=c_cov_norm,
                         prec_loss=prec_loss,
                     )
-
+                    #What would be the purpose of this "zero-intervention"?
                     (
                         _,
                         _,
@@ -385,10 +433,10 @@ def intervene_scbm(
             metrics_dict = metrics.compute(validation=True, config=config)
 
             # define which metrics will be plotted against it
-            if first_intervention:
-                # define our custom x axis metric for wandb
-                run.define_metric("intervention/num_concepts_intervened")
-                first_intervention = False
+            # if first_intervention:
+            #     # define our custom x axis metric for wandb
+            #     run.define_metric("intervention/num_concepts_intervened")
+            #     first_intervention = False
             for i, (k, v) in enumerate(metrics_dict.items()):
                 run.define_metric(
                     f"intervention_{strategy}_{policy}/{k}",
@@ -1002,18 +1050,16 @@ class PSCBM_Strategy:
 
     def __init__(self, inter_strategy, train_loader, model, device, config):
         self.concept_learning = config.model.concept_learning
-        if self.concept_learning in ("autoregressive"):
-            self.num_monte_carlo = config.model.num_monte_carlo
-            self.needs_sampling = True
         # Neither does hard concept learning need sampling from Multivariate Normal in the intervention strategy
         # because it is done in the model's intervention routine from Bernoulli
-        elif self.concept_learning in ("hard", "soft", "embedding"):
-            self.num_monte_carlo = 1
-            self.needs_sampling = False
+        self.num_monte_carlo = 1
+        self.needs_sampling = False
         self.num_concepts = config.data.num_concepts
         self.act_c = nn.Sigmoid()
         if inter_strategy == "simple_perc":
             self.interv_strat = PercentileStrategy()
+        elif inter_strategy == "hard":
+            self.interv_strat = PercentileStrategy(percentile=0)
         elif inter_strategy == "emp_perc":
             self.interv_strat = EmpiricalPercentileStrategy(
                 train_loader=train_loader, model=model.CBM, device=device, is_scbm=False
@@ -1071,6 +1117,7 @@ class PSCBM_Strategy:
 
             ## Compute conditional normal distribution sample-wise
             # Permute covariance s.t. intervened-on concepts are a block at start
+            
             indices = torch.argsort(c_mask, dim=1, descending=True, stable=True)
             perm_cov = c_cov.gather(
                 1, indices.unsqueeze(2).expand(-1, -1, c_cov.size(2))
@@ -1080,45 +1127,40 @@ class PSCBM_Strategy:
             )
             perm_mu = c_mu.gather(1, indices)
             perm_c_intervened_logits = c_intervened_logits.gather(1, indices)
+        
 
             # Compute mu and covariance conditioned on intervened-on concepts
             # Intermediate steps
-            perm_intermediate_cov = torch.matmul(
-                perm_cov[:, num_intervened:, :num_intervened],
-                torch.inverse(perm_cov[:, :num_intervened, :num_intervened]),
+        
+            # Compute mu and covariance conditioned on intervened-on concepts
+            # Intermediate steps
+            interv_concepts = slice(0, num_intervened)
+            non_interv_concepts = slice(num_intervened, None)
+            perm_interv_cov = torch.matmul(
+                perm_cov[:, non_interv_concepts, interv_concepts], 
+                torch.linalg.solve(
+                    perm_cov[:, interv_concepts, interv_concepts],
+                    perm_cov[:, interv_concepts, non_interv_concepts],
+                )
             )
             perm_intermediate_mu = (
-                perm_c_intervened_logits[:, :num_intervened]
-                - perm_mu[:, :num_intervened]
+                perm_c_intervened_logits[:, interv_concepts]
+                - perm_mu[:, interv_concepts]
             )
             # Mu and Cov
             perm_interv_mu = perm_mu[:, num_intervened:] + torch.matmul(
-                perm_intermediate_cov, perm_intermediate_mu.unsqueeze(-1)
+                perm_cov[:, non_interv_concepts, interv_concepts],
+                torch.linalg.solve(
+                    perm_cov[:, interv_concepts, interv_concepts], perm_intermediate_mu.unsqueeze(-1)
+                )
             ).squeeze(-1)
-            perm_interv_cov = perm_cov[
-                :, num_intervened:, num_intervened:
-            ] - torch.matmul(
-                perm_intermediate_cov, perm_cov[:, :num_intervened, num_intervened:]
-            )
+
 
             # Adjust for floating point errors in the covariance computation to keep it symmetric
             perm_interv_cov = numerical_stability_check(
                 perm_interv_cov, device=device
             )  # Uncomment if Normal throws an error. Takes some time so maybe code it more smartly
-
-            if self.needs_sampling:
-                # Sample from conditional normal
-                perm_dist = MultivariateNormal(
-                    perm_interv_mu, covariance_matrix=perm_interv_cov
-                )
-                perm_mcmc_logits = (
-                    perm_dist.rsample([self.num_monte_carlo])
-                    .movedim(0, -1)
-                    .to(torch.float32)
-                )  # [bottleneck_size-num_intervened,mcmc_size]
-
-            else:
-                perm_mcmc_logits = perm_interv_mu.unsqueeze(-1)
+            perm_mcmc_logits = perm_interv_mu.unsqueeze(-1)
 
             # Concat logits of intervened-on concepts
             perm_mcmc_logits = torch.cat(
@@ -1144,21 +1186,25 @@ class PSCBM_Strategy:
                 == torch.arange(len(perm_interv_mu[0][:]), device=device)
             ).all()  # Check that non-intervened concepts weren't permuted s.t. no permutation of interv_mu is needed
 
+            interv_mu = perm_interv_mu
+            interv_cov = perm_interv_cov
             # Concatenate intervened on concept logits with conditioned logits
-            perm_interv_mu = torch.cat(
-                (
-                    perm_mu[:, :num_intervened],
-                    perm_interv_mu
-                ),
-                dim=1
-            )
+            # perm_interv_mu = torch.cat(
+            #     (
+            #         perm_mu[:, :num_intervened],
+            #         perm_interv_mu
+            #     ),
+            #     dim=1
+            # )
             # Move intervened logits back to original order
-            interv_mu = perm_interv_mu.gather(1, indices_reversed)
-            # Move intervened covariance back to original order. A slightly different method than
-            # in mu, is more straight=forward for 2D tensors
-            perm_cov[:, num_intervened:, num_intervened:] = perm_interv_cov
-            interv_cov = perm_cov.gather(1, indices_reversed.unsqueeze(2).expand(-1,-1, perm_cov.size(2)))
-            interv_cov = interv_cov.gather(2, indices_reversed.unsqueeze(1).expand(-1, perm_cov.size(1), -1))
+            # interv_mu = perm_interv_mu.gather(1, indices_reversed)
+            # # Move intervened covariance back to original order. A slightly different method than
+            # # in mu, is more straight=forward for 2D tensors
+            # perm_cov[:, num_intervened:, num_intervened:] = perm_interv_cov
+            # interv_cov = perm_cov.gather(1, indices_reversed.unsqueeze(2).expand(-1,-1, perm_cov.size(2)))
+            # interv_cov = interv_cov.gather(2, indices_reversed.unsqueeze(1).expand(-1, perm_cov.size(1), -1))
+
+
         assert (
             (mcmc_logits.isnan()).any()
             == (interv_mu.isnan()).any()
@@ -1361,11 +1407,15 @@ class SCBMPercentileStrategy:
 
 class PercentileStrategy:
     # Set intervened concepts to 0.05 & 0.95 probabilities
-    def __init__(self):
-        pass
+    def __init__(self, percentile=None):
+        self.percentile = percentile
 
     def _compute_intervened_probs(self, c_true, c_mask):
-        return (0.05 + 0.9 * c_true) * c_mask
+        if self.percentile:
+            return (self.percentile + (1-2*self.percentile)*c_true) * c_mask
+        else:
+            return (0.05 + 0.9 * c_true) * c_mask
+        
 
     def compute_intervened_logits(self, c_mu, c_cov, c_true, c_mask):
         c_intervened_probs = self._compute_intervened_probs(c_true, c_mask)

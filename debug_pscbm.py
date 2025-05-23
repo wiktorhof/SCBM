@@ -90,7 +90,7 @@ def train(config):
         entity=config.logging.entity,
         config=OmegaConf.to_container(config, resolve=True),
         mode=config.logging.mode,
-        tags=[x for x in [config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset] if x and type(x) == str],
+        tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
     ) as run:
         print ("Run initialized")
         if config.logging.mode in ["online", "disabled"]:
@@ -138,7 +138,8 @@ def train(config):
         elif cov_type == "identity":
             model.sigma_concepts = model.covariance = torch.eye(config.data.num_concepts).to(device)
         elif cov_type == "global":
-            lower_triangle, _ = get_empirical_covariance(train_loader).to(device)
+            lower_triangle, _ = get_empirical_covariance(train_loader)
+            lower_triangle.to(device)
             rows, cols = torch.tril_indices(
                 row=config.data.num_concepts, col=config.data.num_concepts, offset=0
             )
@@ -171,7 +172,7 @@ def train(config):
             train_one_epoch = train_one_epoch_pscbm
             intervene = intervene_pscbm
 
-        # if config.model.model == "pscbm" and config.model.load_CBM and config.model.cov_type in ("empirical_true", "empirical_predicted"):
+        # if config.model.model == "pscbm" and config.model.load_weights and config.model.cov_type in ("empirical_true", "empirical_predicted"):
         #     print(
         #         "USING a pretrained CBM. No training is performed."
         #     )
@@ -218,7 +219,7 @@ def train(config):
                     if epoch % config.model.validate_per_epoch == 0:
                         print("\nEVALUATION ON THE VALIDATION SET:\n")
                         validate_one_epoch(
-                            val_loader, model, metrics, epoch, config, loss_fn, device
+                            val_loader, model, metrics, epoch, config, loss_fn, device, run,
                         )
                     train_one_epoch(
                         train_loader,
@@ -332,17 +333,17 @@ def train(config):
                 test=True,
                 concept_names_graph=concept_names_graph,
             )
-        # indices = list(range(test_loader.batch_size))
-        # debug_dataset = Subset(test_loader.dataset, indices)
-        # debug_loader = DataLoader(
-        #     debug_dataset, batch_size=test_loader.batch_size, 
-        #     num_workers=test_loader.num_workers, pin_memory=True, 
-        #     generator=test_loader.generator
-        #     )
+        indices = list(range(4*test_loader.batch_size))
+        debug_dataset = Subset(test_loader.dataset, indices)
+        debug_loader = DataLoader(
+            debug_dataset, batch_size=test_loader.batch_size, 
+            num_workers=test_loader.num_workers, pin_memory=True, 
+            generator=test_loader.generator
+            )
         # Intervention curves
         print("\nPERFORMING INTERVENTIONS:\n")
         intervene(
-            train_loader, test_loader, model, metrics, t_epochs, config, loss_fn, device, run
+            train_loader, debug_loader, model, metrics, t_epochs, config, loss_fn, device, run
         )
     return None
 

@@ -7,6 +7,8 @@ defaults:
 model: 'cbm' #  Model's name (to indicate it's a baseline)
 tag: 'baseline' # Model's tag for wandb logging
 concept_learning: 'hard' # Concept Bottleneck Model baseline, either hard {0,1} or soft logits ['hard', 'soft']
+cov_type: None
+# --------------------------
 
 # --------------------------
 #         Policy
