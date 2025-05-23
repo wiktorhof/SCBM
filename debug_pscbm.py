@@ -138,7 +138,8 @@ def train(config):
         elif cov_type == "identity":
             model.sigma_concepts = model.covariance = torch.eye(config.data.num_concepts).to(device)
         elif cov_type == "global":
-            lower_triangle, _ = get_empirical_covariance(train_loader).to(device)
+            lower_triangle, _ = get_empirical_covariance(train_loader)
+            lower_triangle.to(device)
             rows, cols = torch.tril_indices(
                 row=config.data.num_concepts, col=config.data.num_concepts, offset=0
             )
@@ -179,6 +180,7 @@ def train(config):
         message += f" and {config.model.cov_type} covariance." if "cov_type" in config.model.keys() else "."
         message += f"""Empirical covariance has been computed with {config.model.data_ratio*100}% of all samples
         and off-diagonal elements of the covariance matrix were scaled down by a factor of {config.model.covariance_scaling}.
+        The condition of the empirical covariance is {torch.linalg.cond(model.covariance)}.
         """ if cov_type.startswith("empirical") else ""
         print(message)
         if config.model.get("load_weights", False):
@@ -217,7 +219,7 @@ def train(config):
                     if epoch % config.model.validate_per_epoch == 0:
                         print("\nEVALUATION ON THE VALIDATION SET:\n")
                         validate_one_epoch(
-                            val_loader, model, metrics, epoch, config, loss_fn, device
+                            val_loader, model, metrics, epoch, config, loss_fn, device, run,
                         )
                     train_one_epoch(
                         train_loader,
@@ -331,7 +333,7 @@ def train(config):
                 test=True,
                 concept_names_graph=concept_names_graph,
             )
-        indices = list(range(test_loader.batch_size))
+        indices = list(range(4*test_loader.batch_size))
         debug_dataset = Subset(test_loader.dataset, indices)
         debug_loader = DataLoader(
             debug_dataset, batch_size=test_loader.batch_size, 

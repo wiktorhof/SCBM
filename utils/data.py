@@ -185,7 +185,7 @@ def get_empirical_covariance(dataloader, ratio=1, scaling_factor=None):
         covariance[rows, cols] /= scaling_factor
         covariance[cols, rows] /= scaling_factor
     covariance = numerical_stability_check(covariance, device="cpu")
-    covariance = make_full_rank(covariance)
+    # covariance = make_full_rank(covariance)
     lower_triangle = torch.linalg.cholesky(covariance)
 
     ####### Alternative cov computation if dataset was too large for memory
@@ -244,7 +244,7 @@ def get_empirical_covariance_of_predictions(model, dataloader, ratio=1, scaling_
         for batch in tmp_dataloader:
             features = batch["features"]
             # Calculate concept logits with CBM_model
-            c_logits,_,_ = model(features)
+            c_logits,_,_ = model(features, 300, validation=True)
             loaded_data += c_logits.shape[0]
             if loaded_data > data_to_load:
                 excess = loaded_data - data_to_load
@@ -262,7 +262,7 @@ def get_empirical_covariance_of_predictions(model, dataloader, ratio=1, scaling_
             covariance[rows, cols] /= scaling_factor
             covariance[cols, rows] /= scaling_factor
         covariance = numerical_stability_check(covariance, device="cpu")
-        covariance = make_full_rank(covariance)
+        # covariance = make_full_rank(covariance)
         lower_triangle = torch.linalg.cholesky(covariance)
 
     # ###### Alternative cov computation if dataset was too large for memory

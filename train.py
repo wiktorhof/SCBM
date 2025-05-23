@@ -179,6 +179,7 @@ def train(config):
         message += f" and {config.model.cov_type} covariance." if "cov_type" in config.model.keys() else "."
         message += f"""Empirical covariance has been computed with {config.model.data_ratio*100}% of all samples
         and off-diagonal elements of the covariance matrix were scaled down by a factor of {config.model.covariance_scaling}.
+        The condition of the empirical covariance is {torch.linalg.cond(model.covariance)}.
         """ if cov_type.startswith("empirical") else ""
         print(message)
         if config.model.get("load_weights", False):
