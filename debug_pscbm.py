@@ -352,28 +352,28 @@ def train(config):
             ) if model.concept_learning == 'soft' else define_strategy(
                 "hard", train_loader, model, device, config
             )
-            # print("Generating a dataset for interventions validation...")
-            # start_time = time.perf_counter()
-            # interventions_validation_dataset = create_validation_dataset_pscbm(
-            #     val_loader,
-            #     model,
-            #     metrics,
-            #     config,
-            #     intervention_strategy,
-            #     loss_fn,
-            #     device,
-            #     run,
-            # )
-            # end_time = time.perf_counter()
-            # print(f"Dataset has been generated in {(end_time - start_time):.2f} seconds.")
+            print("Generating a dataset for interventions validation...")
+            start_time = time.perf_counter()
+            interventions_validation_dataset = create_validation_dataset_pscbm(
+                val_loader,
+                model,
+                metrics,
+                config,
+                intervention_strategy,
+                loss_fn,
+                device,
+                run,
+            )
+            end_time = time.perf_counter()
+            print(f"Dataset has been generated in {(end_time - start_time):.2f} seconds.")
             for epoch in range(config.model.i_epochs):
                 # Validate the model periodically
-                # if epoch % config.model.validate_per_epoch == 0:
-                #     print("\nEVALUATION ON THE VALIDATION SET:\n")
-                #     # TODO Implement this function (mimicking training epoch)
-                #     validate_one_epoch_pscbm(
-                #         interventions_validation_dataset, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
-                #     )
+                if epoch % config.model.validate_per_epoch == 0:
+                    print("\nEVALUATION ON THE VALIDATION SET:\n")
+                    # TODO Implement this function (mimicking training epoch)
+                    validate_one_epoch_pscbm(
+                        interventions_validation_dataset, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
+                    )
                 train_one_epoch_pscbm(
                     train_loader, 
                     model, 
@@ -391,7 +391,12 @@ def train(config):
                 # for (name1, param1), (name2, param2) in zip(model.named_parameters(), model2.named_parameters()):
                 #     print(f"{name1}: equal" if param1.data.equal(param2.data) else f"{name1}: different") 
                     # The output after 1 epoch is that all parameters are equal except sigma_concepts. This is what I expected.
-        
+            if config.save_model:
+                torch.save(model.state_dict(), join(experiment_path, "model.pth"))
+                OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
+                print("\nTRAINING FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, "model.pth")}", flush=True)
+            else:
+                print("\nTRAINING FINISHED", flush=True)
         indices = list(range(4*test_loader.batch_size))
         debug_dataset = Subset(test_loader.dataset, indices)
         debug_loader = DataLoader(

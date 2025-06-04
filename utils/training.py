@@ -51,7 +51,7 @@ def train_one_epoch_pscbm(
         scores = torch.rand(num_masks, batch_size, num_concepts)
         topk = torch.topk(scores, num_ones, dim=2)
         indices = topk.indices
-        masks = torch.zeros_like(scores, dtype=torch.int8)
+        masks = torch.zeros_like(scores, dtype=torch.int8) #num_masks, batch_size, num_concepts
         masks.scatter_(2,indices,1) #dim, idx, src
         assert (
         (masks.sum(dim=2)==num_ones).all()
@@ -96,7 +96,13 @@ def train_one_epoch_pscbm(
             run.define_metric(f"train/{k}", step_metric="epoch")
     log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
     log_dict.update({"epoch": epoch + 1})
-    run.log(log_dict)                  
+    run.log(log_dict)    
+
+    prints = f"Epoch {epoch + 1}, Train     : "
+    for key, value in metrics_dict.items():
+        prints += f"{key}: {value:.3f} "
+    print(prints)
+    metrics.reset()              
     return
 
 def train_one_epoch_scbm(

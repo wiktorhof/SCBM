@@ -1,3 +1,4 @@
+# pylint: disable=not-callable
 """
 Run this file to train models using a Hydra configuration, e.g.:
     python train.py +model=SCBM +data=CUB
@@ -20,7 +21,7 @@ from models.losses import create_loss
 from models.models import create_model
 
 from utils.data import get_data, get_empirical_covariance, get_empirical_covariance_of_predictions, get_concept_groups
-from utils.intervention import intervene_cbm, intervene_scbm, intervene_pscbm
+from utils.intervention import intervene_cbm, intervene_scbm, intervene_pscbm, define_strategy
 from utils.training import (
     freeze_module,
     unfreeze_module,
@@ -30,6 +31,7 @@ from utils.training import (
     train_one_epoch_pscbm,
     validate_one_epoch_cbm,
     validate_one_epoch_scbm,
+    create_validation_dataset_pscbm,
     validate_one_epoch_pscbm,
     Custom_Metrics,
 )
@@ -38,7 +40,7 @@ from utils.utils import reset_random_seeds
 
 def train(config):
     """
-    Run the experiments for SCBMs or baselines as defined in the config setting. This method will set up the device, the correct
+    Run the experiments for (P)SCBMs or baselines as defined in the config setting. This method will set up the device, the correct
     experimental paths, initialize Wandb for tracking, generate the dataset, train the model, evaluate the test set performance, and
     finally it will evaluate the intervention performance based on the policies and strategies defined in the config.
     All final results and validations will be stored in Wandb, while the most important ones will be also printed out in the terminal.
@@ -90,7 +92,7 @@ def train(config):
         entity=config.logging.entity,
         config=OmegaConf.to_container(config, resolve=True),
         mode=config.logging.mode,
-        tags=[x for x in [config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset] if x and type(x) == str],
+        tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
     ) as run:
         print ("Run initialized")
         if config.logging.mode in ["online", "disabled"]:
@@ -126,7 +128,7 @@ def train(config):
 
         # Initialize covariance with empirical covariance
         cov_type = config.model.get("cov_type", "")
-        if cov_type.startswith("empirical"):
+        if cov_type.startswith("empirical") or cov_type=="global":
             data_ratio = config.model.get("data_ratio", 1)
             covariance_scaling = config.model.get("covariance_scaling", None)
         if cov_type in ("empirical", "empirical_true"): # empirical_true in PSCBM is equivalent to empirical in SCBM (preserved for backward compatibility)
@@ -138,7 +140,8 @@ def train(config):
         elif cov_type == "identity":
             model.sigma_concepts = model.covariance = torch.eye(config.data.num_concepts).to(device)
         elif cov_type == "global":
-            lower_triangle, _ = get_empirical_covariance(train_loader).to(device)
+            lower_triangle, _ = get_empirical_covariance(train_loader, ratio=data_ratio, scaling_factor=covariance_scaling)
+            lower_triangle.to(device)
             rows, cols = torch.tril_indices(
                 row=config.data.num_concepts, col=config.data.num_concepts, offset=0
             )
@@ -184,7 +187,7 @@ def train(config):
         print(message)
         if config.model.get("load_weights", False):
             print(
-                "Pretrained weights have been loaded. No training. Only interventions."
+                "Pretrained weights have been loaded. The model's parameters aren't trained."
             )
         else:
             print(
@@ -218,7 +221,7 @@ def train(config):
                     if epoch % config.model.validate_per_epoch == 0:
                         print("\nEVALUATION ON THE VALIDATION SET:\n")
                         validate_one_epoch(
-                            val_loader, model, metrics, epoch, config, loss_fn, device
+                            val_loader, model, metrics, epoch, config, loss_fn, device, run,
                         )
                     train_one_epoch(
                         train_loader,
@@ -250,7 +253,7 @@ def train(config):
                     step_size=config.model.decrease_every,
                     gamma=1 / config.model.lr_divisor,
                 )
-                for epoch in range(c_epochs):
+                for epoch in range(c_epochs): # pylint: disable
                     # Validate the model periodically
                     if epoch % config.model.validate_per_epoch == 0:
                         print("\nEVALUATION ON THE VALIDATION SET:\n")
@@ -332,13 +335,68 @@ def train(config):
                 test=True,
                 concept_names_graph=concept_names_graph,
             )
-        # indices = list(range(test_loader.batch_size))
-        # debug_dataset = Subset(test_loader.dataset, indices)
-        # debug_loader = DataLoader(
-        #     debug_dataset, batch_size=test_loader.batch_size, 
-        #     num_workers=test_loader.num_workers, pin_memory=True, 
-        #     generator=test_loader.generator
-        #     )
+        if config.model.model == "pscbm" and config.model.cov_type in ("global"):
+            print("TRAINING THE PSCBM FOR INTERVENTIONS")
+            wandb.define_metric("epoch")
+            model.CBM.apply(freeze_module)
+            
+            #TODO paramters for optimizer and scheduler should be optimized :-) Don't I exaggerate?
+            optimizer = create_optimizer(config.model, model)
+            lr_scheduler = optim.lr_scheduler.StepLR(
+                    optimizer,
+                    step_size=config.model.decrease_every,
+                    gamma=1 / config.model.lr_divisor,
+                )
+            intervention_strategy = define_strategy(
+                "simple_perc", train_loader, model, device, config
+            ) if model.concept_learning == 'soft' else define_strategy(
+                "hard", train_loader, model, device, config
+            )
+            print("Generating a dataset for interventions validation...")
+            start_time = time.perf_counter()
+            interventions_validation_dataset = create_validation_dataset_pscbm(
+                val_loader,
+                model,
+                metrics,
+                config,
+                intervention_strategy,
+                loss_fn,
+                device,
+                run,
+            )
+            end_time = time.perf_counter()
+            print(f"Dataset has been generated in {(end_time - start_time):.2f} seconds.")
+            for epoch in range(config.model.i_epochs):
+                # Validate the model periodically
+                if epoch % config.model.validate_per_epoch == 0:
+                    print("\nEVALUATION ON THE VALIDATION SET:\n")
+                    # TODO Implement this function (mimicking training epoch)
+                    validate_one_epoch_pscbm(
+                        interventions_validation_dataset, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
+                    )
+                train_one_epoch_pscbm(
+                    train_loader, 
+                    model, 
+                    optimizer, 
+                    metrics, 
+                    epoch, 
+                    config, 
+                    intervention_strategy, 
+                    loss_fn, 
+                    device, 
+                    run,
+                    )
+                lr_scheduler.step()
+                # model2 = create_model(config)
+                # for (name1, param1), (name2, param2) in zip(model.named_parameters(), model2.named_parameters()):
+                #     print(f"{name1}: equal" if param1.data.equal(param2.data) else f"{name1}: different") 
+                    # The output after 1 epoch is that all parameters are equal except sigma_concepts. This is what I expected.
+            if config.save_model:
+                torch.save(model.state_dict(), join(experiment_path, "model.pth"))
+                OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
+                print("\nTRAINING FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, "model.pth")}", flush=True)
+            else:
+                print("\nTRAINING FINISHED", flush=True)
         # Intervention curves
         print("\nPERFORMING INTERVENTIONS:\n")
         intervene(
