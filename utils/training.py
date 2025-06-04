@@ -1,3 +1,4 @@
+# pylint: disable=not-callable
 """
 Utility functions for training.
 """
@@ -6,6 +7,7 @@ import numpy as np
 from sklearn.metrics import jaccard_score
 import torch
 from torch import nn
+from torch.utils.data import TensorDataset, DataLoader
 from tqdm import tqdm
 from torchmetrics import Metric
 from torchmetrics.utilities import dim_zero_cat
@@ -14,9 +16,87 @@ import wandb
 from utils.metrics import calc_target_metrics, calc_concept_metrics
 from utils.plotting import compute_and_plot_heatmap
 
-def train_one_epoch_pscbm(train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device, run):
-    train_one_epoch_cbm(train_loader, model.CBM, optimizer, mode, metrics, epoch, config, loss_fn, device, run
-    )
+def train_one_epoch_pscbm(
+    train_loader, model, optimizer, metrics, epoch, config, 
+    intervention_strategy, loss_fn, device, run, num_masks=10, mask_density=0.15, num_ones=None):
+    """
+    Train the Probabilistic Stochastic Concept Bottleneck Model (PSCBM) for one epoch. The training only involves the covariance matrix.
+    It can be trained in 2 modes:
+    - "global": where the covariance is a global parameter of the model
+    - "amortized": there the covariance is predicted for each sample from the CBMs features
+    In both cases, the CBMs parameters aren't modified by the training.
+    Args:
+        train_loader (torch.utils.data.DataLoader): DataLoader for the training data.
+        model (torch.nn.Module): The PSCBM model to be trained.
+        optimizer (torch.optim.Optimizer): The optimizer for training the model.
+        metrics (object): An object to track and compute metrics during training.
+        epoch (int): The current epoch number.
+        config (dict): Configuration dictionary containing model and training settings.
+        loss_fn (callable): The loss function used to compute losses.
+        device (torch.device): The device to run the computations on.
+    """
+    model.train()
+    metrics.reset()
+
+    for k, batch in enumerate(
+    tqdm(train_loader, desc=f"Epoch {epoch + 1}", position=0, leave=True)
+):
+        batch_features, target_true, concepts_true = batch["features"].to(device), batch["labels"].to(device), batch["concepts"].to(device)
+
+        concepts_pred_probs, target_pred_logits_interv, concepts, concepts_cov = model(batch_features, epoch)
+        
+        batch_size, num_concepts = concepts_true.shape
+        if not num_ones:
+            num_ones = int(num_concepts*mask_density)
+        scores = torch.rand(num_masks, batch_size, num_concepts)
+        topk = torch.topk(scores, num_ones, dim=2)
+        indices = topk.indices
+        masks = torch.zeros_like(scores, dtype=torch.int8)
+        masks.scatter_(2,indices,1) #dim, idx, src
+        assert (
+        (masks.sum(dim=2)==num_ones).all()
+        )
+        concepts_pred_mu = torch.logit(concepts_pred_probs, eps=1e-6)
+        for concepts_mask in masks:
+            concepts_mu_interv, concepts_cov_interv, c_mcmc_probs, c_mcmc_logits = intervention_strategy.compute_intervention(
+                                    concepts_pred_mu,
+                                    concepts_cov,
+                                    concepts_true,
+                                    concepts_mask,
+                                )
+            concepts_pred_probs_interv = c_mcmc_probs.mean(-1)
+            concepts_pred_logits_interv = c_mcmc_logits.mean(-1)
+            y_pred_intervened = model.intervene(
+                concepts_pred_logits_interv,
+                concepts_mask,
+                batch_features,
+                concepts_true,
+                )
+            optimizer.zero_grad()
+            c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
+            target_loss, concepts_loss, prec_loss, total_loss = loss_fn(c_mcmc_probs, concepts_true, target_pred_logits_interv, target_true, concepts_cov, cov_not_triang=True)
+            total_loss.backward(retain_graph=True)
+            optimizer.step()
+            # Store predictions
+            metrics.update(
+                target_loss,
+                concepts_loss,
+                total_loss,
+                target_true,
+                y_pred_intervened,
+                concepts_true,
+                concepts_pred_probs_interv,
+                prec_loss=prec_loss,
+                cov_norm=c_norm,
+            )     
+    # Calculate and log metrics
+    metrics_dict = metrics.compute(config=config)
+    if epoch == 0:
+        for (k,v) in metrics_dict.items():
+            run.define_metric(f"train/{k}", step_metric="epoch")
+    log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
+    log_dict.update({"epoch": epoch + 1})
+    run.log(log_dict)                  
     return
 
 def train_one_epoch_scbm(
@@ -73,7 +153,7 @@ def train_one_epoch_scbm(
         concepts_true = batch["concepts"].to(device)
 
         # Forward pass
-        concepts_mcmc_probs, triang_cov, target_pred_logits = model(
+        concepts_mcmc_probs, triang_cov, target_pred_logits_interv = model(
             batch_features, epoch, c_true=concepts_true
         )
 
@@ -84,7 +164,7 @@ def train_one_epoch_scbm(
         target_loss, concepts_loss, prec_loss, total_loss = loss_fn(
             concepts_mcmc_probs,
             concepts_true,
-            target_pred_logits,
+            target_pred_logits_interv,
             target_true,
             triang_cov,
         )
@@ -104,7 +184,7 @@ def train_one_epoch_scbm(
             concepts_loss,
             total_loss,
             target_true,
-            target_pred_logits,
+            target_pred_logits_interv,
             concepts_true,
             concepts_pred_probs,
             prec_loss=prec_loss,
@@ -180,22 +260,22 @@ def train_one_epoch_cbm(
 
         # Forward pass
         if config.model.training_mode == "independent" and mode == "t":
-            concepts_pred_probs, target_pred_logits, concepts_hard = model(
+            concepts_pred_probs, target_pred_logits_interv, concepts_hard = model(
                 batch_features, epoch, concepts_true
             )
         elif config.model.concept_learning == "autoregressive" and mode == "c":
-            concepts_pred_probs, target_pred_logits, concepts_hard = model(
+            concepts_pred_probs, target_pred_logits_interv, concepts_hard = model(
                 batch_features, epoch, concepts_train_ar=concepts_true
             )
         else:
-            concepts_pred_probs, target_pred_logits, concepts_hard = model(
+            concepts_pred_probs, target_pred_logits_interv, concepts_hard = model(
                 batch_features, epoch
             )
         # Backward pass depends on the training mode of the model
         optimizer.zero_grad()
         # Compute the loss
         target_loss, concepts_loss, total_loss = loss_fn(
-            concepts_pred_probs, concepts_true, target_pred_logits, target_true
+            concepts_pred_probs, concepts_true, target_pred_logits_interv, target_true
         )
 
         if mode == "j":
@@ -212,7 +292,7 @@ def train_one_epoch_cbm(
             concepts_loss,
             total_loss,
             target_true,
-            target_pred_logits,
+            target_pred_logits_interv,
             concepts_true,
             concepts_pred_probs,
         )
@@ -232,30 +312,218 @@ def train_one_epoch_cbm(
     metrics.reset()
     return
 
+#TODO Currently this dataset contains losses without interventions. Ideally, the included losses should be after intervention?
+# Or, in any case, what I care about is that the difference in loss increases - not that it is 0 in the beginning.
+def create_validation_dataset_pscbm(
+    dataloader,
+    model,
+    metrics,
+    config,
+    intervention_strategy,
+    loss_fn,
+    device,
+    run,
+    concept_names_graph=None,
+    num_masks=10, # Number of random concept masks per data point
+    mask_density=0.15, # Average ratio of concepts which are known in interventions.
+    num_ones=None
+):
+    """
+    Create a validation loader for training the PSCBM for interventions.
+
+    This function generates a validation dataset for interventions based on the provided dataloader. For each data point, it computes
+    initial losses without interventions and generates a tensor of random masks to validate interventions. This allows to perform interventions during validation pass without
+    reevaluating the model.
+
+    Args:
+        dataloader (torch.utils.data.DataLoader): DataLoader for the validation data. Each batch should be a dictionary containing:
+            - "features" (torch.Tensor): Input features of shape (batch_size, feature_dim).
+            - "labels" (torch.Tensor): Target labels of shape (batch_size,).
+            - "concepts" (torch.Tensor): Concept labels of shape (batch_size, num_concepts).
+        model (torch.nn.Module): The PSCBM model to be validated.
+        metrics (object): An object to track and compute metrics during validation.
+        epoch (int): The current epoch number.
+        config (dict): Configuration dictionary containing model and validation settings.
+        loss_fn (callable): The loss function used to compute losses.
+        device (torch.device): The device to run the computations on.
+        run (wandb.Run): WandB run object for logging metrics.
+        concept_names_graph (list, optional): List of concept names for plotting the heatmap. Default is None.
+        num_masks (int, optional): Number of random concept masks per data point. Default is 10.
+        mask_density (float, optional): Average ratio of concepts which are known in interventions. Default is 0.15.
+
+    Returns:
+        torch.utils.data.DataLoader: A DataLoader containing the intervention validation dataset. Each batch is a tuple of:
+            - target_loss (torch.Tensor): Loss for the target predictions.
+            - concepts_loss (torch.Tensor): Loss for the concept predictions.
+            - precision_loss (torch.Tensor): Loss for the precision of predictions.
+            - total_loss (torch.Tensor): Total loss combining all components.
+            - concepts_pred_mu (torch.Tensor): Predicted concept logits.
+            - concepts_cov (torch.Tensor): Covariance matrix of predicted concepts.
+            - concepts_true (torch.Tensor): Ground truth concept labels.
+            - target_true (torch.Tensor): Ground truth target labels.
+            - masks (torch.Tensor): Random masks for interventions.
+    """
+    # Ensure mask_density is within the valid range [0, 1]
+    assert 0.0 <= mask_density <= 1.0, "Invalid mask_density: must be a float between 0 and 1."
+    model.eval()
+    metrics.reset()
+    with torch.no_grad():
+        intervention_validation_dataset = []
+        masks_dataset = []
+        for k, batch in enumerate(tqdm(dataloader, position=0, leave=True)):
+            batch_features, target_true, concepts_true = batch["features"].to(device), batch["labels"].to(device), batch["concepts"].to(device)
+
+            # Masks computation seems valid.
+            # masks = torch.zeros_like(concepts_true.unsqueeze(0).expand(num_masks, -1, -1), dtype=torch.int32)
+            num_concepts = concepts_true.shape[-1]
+            batch_size = concepts_true.shape[0]
+            if not num_ones:
+                num_ones = int(num_concepts*mask_density)
+            # Generate a batch of masks with shape (num_masks, batch_size, num_concepts) where each mask contains exactly num_ones 1s.
+            # Code created with the help of GitHub Copilot.
+            scores = torch.rand(batch_size, num_masks, num_concepts)
+            topk = torch.topk(scores, num_ones, dim=2)
+            indices = topk.indices
+            masks = torch.zeros_like(scores, dtype=torch.int8)
+            masks.scatter_(2,indices,1) #dim, idx, src
+            assert (
+            (masks.sum(dim=2)==num_ones).all()
+            )
+            masks_dataset.append(masks)
+            concepts_pred_probs, target_pred_logits_interv, concepts, concepts_cov = model(batch_features, epoch=0, validation=True)
+            concepts_pred_mu = torch.logit(concepts_pred_probs,eps=1e-6)
+            # If the underlying CBM is hard, it returns a tensor of concept samples. In soft case it doesn't, so we just use concepts_pred_probs. I am not sure, how it
+            # Behaves in CEM case.
+            concepts_mcmc_probs = concepts_pred_probs.unsqueeze(-1)
+            target_loss, concepts_loss, precision_loss, total_loss = loss_fn(concepts_mcmc_probs, concepts_true, target_pred_logits_interv, target_true, concepts_cov, cov_not_triang=True)
+            intervention_validation_dataset.append(
+                [
+                    target_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
+                    concepts_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
+                    precision_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
+                    total_loss.cpu().unsqueeze(0).expand(target_true.shape[0]), 
+                    concepts_pred_mu.cpu(),
+                    concepts_cov.cpu(),
+                    concepts_true.cpu(),
+                    target_true.cpu(),
+                    batch_features.cpu(),
+                ]
+            )
+
+        intervention_validation_dataset = [
+            torch.cat(
+                [sublist[i] for sublist in intervention_validation_dataset], dim=0
+            )
+            for i in range(len(intervention_validation_dataset[0]))
+        ]
+        masks_dataset = torch.cat(masks_dataset, dim=0)
+        # masks_dataset = torch.swapdims(masks_dataset, 0, 1)
+        intervention_dataset = TensorDataset(
+            intervention_validation_dataset[0],  # target_loss
+            intervention_validation_dataset[1],  # concepts_loss
+            intervention_validation_dataset[2],  # precision_loss
+            intervention_validation_dataset[3],  # total_loss
+            intervention_validation_dataset[4],  # concepts_pred_mu
+            intervention_validation_dataset[5],  # concepts_cov
+            intervention_validation_dataset[6],  # concepts_true
+            intervention_validation_dataset[7],  # target_true
+            intervention_validation_dataset[8],  # batch_features
+            masks_dataset,                       # masks
+        )
+        intervention_validation_loader = DataLoader(
+            intervention_dataset,
+            batch_size=config.model.val_batch_size,
+            shuffle=False,
+            num_workers=config.workers,
+        )
+
+        return intervention_validation_loader
+
+
+            
+
 def validate_one_epoch_pscbm(
     loader,
     model,
     metrics,
     epoch,
     config,
+    strategy,
     loss_fn,
     device,
     run,
     test=False,
     concept_names_graph=None
 ):
-    validate_one_epoch_cbm(
-            loader,
-            model.CBM,
-            metrics,
-            epoch,
-            config,
-            loss_fn,
-            device,
-            run,
-            test=test,
-            concept_names_graph=concept_names_graph,
-    )
+    """
+    Args:
+        loader 
+    """
+    model.eval()
+    metrics.reset()
+    with torch.no_grad():
+        for k, batch in enumerate(tqdm(loader, desc=f"Epoch {epoch+1}", position=0, leave=True)):
+            (
+                target_loss_orig, concepts_loss_orig, precision_loss_orig, total_loss_orig, 
+                concepts_pred_mu, _, concepts_true, target_true, batch_features, masks
+            ) = (item.to(device) for item in batch)
+            # At this point dimension swapping is necessary and here only. The reason: inside the validation dataset the leading dimension
+            # is necessarily the batch dimension.
+            # However, since I have multiple masks, I swap these 2 dimensions, because my functions can process a batch datapoints including masks
+            # But they are unable to handle multiple masks for a single datapoint.
+            masks = torch.swapdims(masks, 0, 1) # masks.size: (num_masks,batch_size,num_concepts)
+            # Concepts mu is the same before and after covariance training, but concepts_cov differs.
+            _, _, _, concepts_cov = model(batch_features, epoch=epoch, cov_only=True)
+            for concepts_mask in masks:
+                concepts_mu_interv, concepts_cov_interv, c_mcmc_probs, c_mcmc_logits = strategy.compute_intervention(
+                    concepts_pred_mu, concepts_cov, concepts_true, concepts_mask
+                )
+                concepts_pred_logits_interv = c_mcmc_logits.mean(-1)
+                concepts_pred_probs_interv = c_mcmc_probs.mean(-1)
+                c_norm = torch.norm(concepts_cov_interv) / (concepts_cov_interv.numel()**0.5)
+                target_pred_logits_interv = model.intervene(
+                    concepts_pred_logits_interv, concepts_mask, batch_features, concepts_true
+                    )
+                concepts_mcmc_probs = concepts_pred_probs_interv.unsqueeze(-1)
+                target_loss, concepts_loss, precision_loss, total_loss = loss_fn(
+                    concepts_mcmc_probs, concepts_true, target_pred_logits_interv, target_true, concepts_cov, cov_not_triang=True
+                )
+                metrics.update(
+                    target_loss_orig[0]-target_loss,
+                    concepts_loss_orig[0]-concepts_loss,
+                    total_loss_orig[0]-total_loss,
+                    target_true,
+                    target_pred_logits_interv,
+                    concepts_true,
+                    concepts_pred_probs_interv,
+                    cov_norm=c_norm,
+                    prec_loss=precision_loss_orig[0]-precision_loss
+                )
+        metrics_dict = metrics.compute(validation=True, config=config)
+        if not test:
+            if epoch == 0:
+                for (k,v) in metrics_dict.items():
+                    wandb.define_metric(f"validation_cov_training/{k}", step_metric="epoch")
+            log_dict = {f"validation_cov_training/{k}": v for (k, v) in metrics_dict.items()}
+            log_dict.update({"epoch": epoch})
+            run.log(log_dict)
+            prints = f"Epoch {epoch}, Validation: "
+        else:
+            if epoch == 0:
+                for (k,v) in metrics_dict.items():
+                    wandb.define_metric(f"test_cov_training/{k}", step_metric="epoch")
+            log_dict = {f"test_cov_training/{k}": v for (k, v) in metrics_dict.items()}
+            log_dict.update({"epoch": epoch})
+            run.log(log_dict)
+            prints = f"Test: "
+        for key, value in metrics_dict.items():
+            prints += f"{key}: {value:.3f} "
+        print(prints)
+        print()
+        metrics.reset()
+
+
+
 
 
 def validate_one_epoch_scbm(
@@ -309,7 +577,7 @@ def validate_one_epoch_scbm(
             ].to(device)
             concepts_true = batch["concepts"].to(device)
 
-            concepts_mcmc_probs, triang_cov, target_pred_logits = model(
+            concepts_mcmc_probs, triang_cov, target_pred_logits_interv = model(
                 batch_features, epoch, validation=True, c_true=concepts_true
             )
             # Compute covariance matrix of concepts
@@ -332,7 +600,7 @@ def validate_one_epoch_scbm(
             target_loss, concepts_loss, prec_loss, total_loss = loss_fn(
                 concepts_mcmc_probs,
                 concepts_true,
-                target_pred_logits,
+                target_pred_logits_interv,
                 target_true,
                 triang_cov,
             )
@@ -344,7 +612,7 @@ def validate_one_epoch_scbm(
                 concepts_loss,
                 total_loss,
                 target_true,
-                target_pred_logits,
+                target_pred_logits_interv,
                 concepts_true,
                 concepts_pred_probs,
                 prec_loss=prec_loss,
@@ -424,7 +692,7 @@ def validate_one_epoch_cbm(
             ].to(device)
             concepts_true = batch["concepts"].to(device)
 
-            concepts_pred_probs, target_pred_logits, concepts_hard = model(
+            concepts_pred_probs, target_pred_logits_interv, concepts_hard = model(
                 batch_features, epoch, validation=True
             )
             if config.model.concept_learning == "autoregressive":
@@ -439,7 +707,7 @@ def validate_one_epoch_cbm(
                 )  # Calculating the metrics on the average probabilities from MCMC
 
             target_loss, concepts_loss, total_loss = loss_fn(
-                concepts_pred_probs, concepts_true, target_pred_logits, target_true
+                concepts_pred_probs, concepts_true, target_pred_logits_interv, target_true
             )
 
             # Store predictions
@@ -448,7 +716,7 @@ def validate_one_epoch_cbm(
                 concepts_loss,
                 total_loss,
                 target_true,
-                target_pred_logits,
+                target_pred_logits_interv,
                 concepts_true,
                 concepts_pred_probs,
             )

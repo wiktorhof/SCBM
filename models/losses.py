@@ -34,9 +34,8 @@ def create_loss(config):
             config=config.model,
         )
     elif config.model.model == "pscbm":
-        return CBLoss(
+        return SCBLoss(
             num_classes=config.data.num_classes,
-            reduction="mean",
             alpha=config.model.alpha,
             config=config.model,
         )
@@ -216,3 +215,8 @@ class SCBLoss(nn.Module):
         total_loss = target_loss + concepts_loss + prec_loss
 
         return target_loss, concepts_loss, prec_loss, total_loss
+
+class InterventionLoss(nn.Module):
+    """
+    Loss function for optimizing covariance for performance on interventions
+    """

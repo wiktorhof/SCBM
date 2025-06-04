@@ -1,3 +1,4 @@
+# pylint: disable=not-callable
 """
 Utility functions for intervention of SCBMs and baselines.
 """
@@ -56,7 +57,8 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                     (
                         concepts_pred_probs,
                         target_pred_logits,
-                        concepts, #Concepts are 0 in soft case, MCMC in hard and embeddings in embedding
+                        concepts,#Concepts are 0 in soft case, MCMC in hard and embeddings in embedding
+                        c_cov,
                     ) = model(batch_features, epoch, validation=True)
                     concepts_pred_logits = torch.logit(concepts_pred_probs, eps=1e-6)
 
@@ -67,11 +69,12 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                         target_pred_logits,
                         target_true,
                     )
-                    if model.cov_type in ("empirical_true", "empirical_predicted", "identity"):
-                        c_cov = model.covariance
-                        c_cov = numerical_stability_check(c_cov, device=device)
-                        # Add the batch dimension in the beginning
-                        c_cov = c_cov.repeat(concepts_true.shape[0], 1, 1)
+                    # if model.cov_type in ("empirical_true", "empirical_predicted", "identity"):
+                    #     c_cov = model.covariance
+                    #     c_cov = numerical_stability_check(c_cov, device=device)
+                    #     # Add the batch dimension in the beginning
+                    #     c_cov = c_cov.repeat(concepts_true.shape[0], 1, 1)
+                    
 
                     c_cov_norm = torch.norm(c_cov) / (c_cov.numel() ** 0.5)
 
@@ -233,12 +236,6 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                                                                  ])
                 # Calculate and log metrics
                 metrics_dict = metrics.compute(validation=True, config=config)
-                run.log(
-                        {
-                            f"intervention_{strategy}_{policy}/concepts_covariance": concepts_cov_interv.cpu(),
-                            "intervention/num_concepts_intervened": num_intervened,
-                        }
-                    )
                # define which metrics will be plotted against it
                 for i, (k, v) in enumerate(metrics_dict.items()):
                     run.log(
@@ -1096,7 +1093,7 @@ class PSCBM_Strategy:
             tuple: A tuple containing the intervened-on concept means, covariances, MCMC sampled concept probabilities (from normal distribution), and logits.
                     Note that the probabilities are set to 0/1 for the intervened-on concepts according to the ground-truth.
         """
-        num_intervened = c_mask.sum(1)[0]
+        num_intervened = c_mask[0].sum()
         device = c_mask.device
 
         if num_intervened == 0:
@@ -1284,7 +1281,7 @@ class SCBM_Strategy:
             tuple: A tuple containing the intervened-on concept means, covariances, MCMC sampled concept probabilities, and logits.
                     Note that the probabilities are set to 0/1 for the intervened-on concepts according to the ground-truth.
         """
-        num_intervened = c_mask.sum(1)[0]
+        num_intervened = c_mask[0].sum()
         device = c_mask.device
 
         if num_intervened == 0:

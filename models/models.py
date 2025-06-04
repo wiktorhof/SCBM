@@ -1,3 +1,4 @@
+# pylint: disable=not-callable
 """
 SCBM and baseline models.
 """
@@ -16,7 +17,6 @@ import yaml
 from models.networks import FCNNEncoder
 from utils.training import freeze_module, unfreeze_module
 from utils.data import get_empirical_covariance
-
 
 def create_model(config: DictConfig):
     """
@@ -174,6 +174,7 @@ class PSCBM(nn.Module):
         self.concept_predictor = self.CBM.concept_predictor
         self.act_c = self.CBM.act_c
 
+        self.n_features = self.CBM.n_features
         self.pred_dim = self.CBM.pred_dim
 
         # Compute covariance
@@ -181,22 +182,70 @@ class PSCBM(nn.Module):
             self.sigma_concepts = torch.zeros(
                 int(self.num_concepts * (self.num_concepts + 1) / 2)
             )
+        elif self.cov_type == "global":
+            self.sigma_concepts = nn.Parameter(
+                torch.zeros(int(self.num_concepts *(self.num_concepts + 1) / 2))
+                )
+        elif self.cov_type == "amortized":
+            self.sigma_concepts = nn.Linear(
+                self.n_features,
+                int(self.num_concepts * (self.num_concepts + 1) / 2),
+                bias=True,
+            )
+            self.sigma_concepts.weight.data *= (
+                0.01  # To prevent exploding covariance matrix at initialization
+            )
 
         # In a latter step I want to implement training the covariance matrix for intervention efficacy.
         else:
-            raise NotImplementedError("Other covariance types are not implemented yet.")
+            raise NotImplementedError("Other covariance types are not implemented.")
 
 
-    def forward(self, x, epoch, c_true=None, validation=False, return_full=True):
-        concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
+    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, cov_only=False):
+        """
+        Returns:
+        concepts_pred_probs
+        target_pred_logits
+        concepts
+        concepts_cov: in full form, not triangular - This is my design choice
+        """
+        if self.cov_type.startswith("empirical") or self.cov_type == "identity":
+            concepts_cov = self.covariance.repeat(x.shape[0],1)
+        elif self.cov_type == "global":
+            c_sigma_triang = self.sigma_concepts.repeat(x.shape[0], 1)
+        elif self.cov_type == "amortized":
+            intermediate = self.encoder(x)
+            c_sigma_triang = self.sigma_concepts(intermediate)
+        if not (self.cov_type.startswith("empirical") or self.cov_type == "identity"):
+            # Create a lower-triangular matrix
+            c_triang_cov = torch.zeros(
+                (c_sigma_triang.shape[0], self.num_concepts, self.num_concepts),
+                device=c_sigma_triang.device,
+            )
+            rows, cols = torch.tril_indices(
+                row=self.num_concepts, col=self.num_concepts, offset=0
+            )
+            diag_idx = rows == cols
+            c_triang_cov[:, rows, cols] = c_sigma_triang
+            # Make the diagonal positive
+            c_triang_cov[:, range(self.num_concepts), range(self.num_concepts)] = (
+                F.softplus(c_sigma_triang[:, diag_idx]) + 1e-6
+            )
+            concepts_cov = c_triang_cov @ c_triang_cov.transpose(dim0=-2, dim1=-1)
+
+        # concepts_cov = numerical_stability_check(concepts_cov)
         # concepts_pred_logits=torch.logit(concepts_pred_probs, eps=1e-6)
-        return concepts_pred_probs, target_pred_logits, concepts
+        # cov_only is useful for validation of covariance training where mu's are always the same and only the covariance changes.
+        if cov_only:
+            return None, None, None, concepts_cov
+        else:
+            concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
+            return concepts_pred_probs, target_pred_logits, concepts, concepts_cov
 
     def intervene(self, concepts_intervened_logits, c_mask, input_features, c_true):
         """
         This function does de facto the same as the corresponding function in regular CBM. It is however simplified,
-        because autoregressive mode is not supported. (Common case: I might have called the CBM's function, but I did
-        not know it before I rewrote it.)
+        because autoregressive mode is not supported. 
         It is of course assumed that concept correlations have already been applied to the passed probabilities.
         Args:
             concepts_mu_intervened: concepts LOGITS after intervention
@@ -329,9 +378,9 @@ class SCBM(nn.Module):
         # Architectures
         # Encoder h(.)
         if self.encoder_arch == "FCNN":
-            n_features = 256
+            self.n_features = 256
             self.encoder = FCNNEncoder(
-                num_inputs=config.data.num_covariates, num_hidden=n_features, num_deep=2
+                num_inputs=config.data.num_covariates, num_hidden=self.n_features, num_deep=2
             )
         elif self.encoder_arch == "resnet18":
             self.encoder_res = models.resnet18(weights=None)
@@ -343,12 +392,12 @@ class SCBM(nn.Module):
                 )
             )
 
-            n_features = self.encoder_res.fc.in_features
+            self.n_features = self.encoder_res.fc.in_features
             self.encoder_res.fc = Identity()
             self.encoder = nn.Sequential(self.encoder_res)
 
         elif self.encoder_arch == "simple_CNN":
-            n_features = 256
+            self.n_features = 256
             self.encoder = nn.Sequential(
                 nn.Conv2d(3, 32, 5, 3),
                 nn.ReLU(),
@@ -357,14 +406,14 @@ class SCBM(nn.Module):
                 nn.MaxPool2d(2),
                 nn.Dropout(0.25),
                 nn.Flatten(),
-                nn.Linear(9216, n_features),
+                nn.Linear(9216, self.n_features),
                 nn.ReLU(),
             )
 
         else:
             raise NotImplementedError("ERROR: architecture not supported!")
 
-        self.mu_concepts = nn.Linear(n_features, self.num_concepts, bias=True)
+        self.mu_concepts = nn.Linear(self.n_features, self.num_concepts, bias=True)
 
         if self.cov_type == "global":
             self.sigma_concepts = nn.Parameter(
@@ -376,7 +425,7 @@ class SCBM(nn.Module):
             )
         else: # "amortized"
             self.sigma_concepts = nn.Linear(
-                n_features,
+                self.n_features,
                 int(self.num_concepts * (self.num_concepts + 1) / 2),
                 bias=True,
             )
@@ -602,9 +651,9 @@ class CBM(nn.Module):
         # Architectures
         # Encoder h(.)
         if self.encoder_arch == "FCNN":
-            n_features = 256
+            self.n_features = 256
             self.encoder = FCNNEncoder(
-                num_inputs=config.data.num_covariates, num_hidden=n_features, num_deep=2
+                num_inputs=config.data.num_covariates, num_hidden=self.n_features, num_deep=2
             )
         elif self.encoder_arch == "resnet18":
             self.encoder_res = models.resnet18(weights=None)
@@ -616,12 +665,12 @@ class CBM(nn.Module):
                     weights_only=True
                 )
             )
-            n_features = self.encoder_res.fc.in_features
+            self.n_features = self.encoder_res.fc.in_features
             self.encoder_res.fc = Identity()
             self.encoder = nn.Sequential(self.encoder_res)
 
         elif self.encoder_arch == "simple_CNN":
-            n_features = 256
+            self.n_features = 256
             self.encoder = nn.Sequential(
                 nn.Conv2d(3, 32, 5, 3),
                 nn.ReLU(),
@@ -630,7 +679,7 @@ class CBM(nn.Module):
                 nn.MaxPool2d(2),
                 nn.Dropout(0.25),
                 nn.Flatten(),
-                nn.Linear(9216, n_features),
+                nn.Linear(9216, self.n_features),
                 nn.ReLU(),
             )
 
@@ -643,7 +692,7 @@ class CBM(nn.Module):
             self.positive_embeddings = nn.ModuleList(
                 [
                     nn.Sequential(
-                        nn.Linear(n_features, self.CEM_embedding, bias=True),
+                        nn.Linear(self.n_features, self.CEM_embedding, bias=True),
                         nn.LeakyReLU(),
                     )
                     for _ in range(self.num_concepts)
@@ -652,7 +701,7 @@ class CBM(nn.Module):
             self.negative_embeddings = nn.ModuleList(
                 [
                     nn.Sequential(
-                        nn.Linear(n_features, self.CEM_embedding, bias=True),
+                        nn.Linear(self.n_features, self.CEM_embedding, bias=True),
                         nn.LeakyReLU(),
                     )
                     for _ in range(self.num_concepts)
@@ -667,7 +716,7 @@ class CBM(nn.Module):
                 self.concept_predictor = nn.ModuleList(
                     [
                         nn.Sequential(
-                            nn.Linear(n_features + i, 50, bias=True),
+                            nn.Linear(self.n_features + i, 50, bias=True),
                             nn.LeakyReLU(),
                             nn.Linear(50, 1, bias=True),
                         )
@@ -677,7 +726,7 @@ class CBM(nn.Module):
 
             else:
                 self.concept_predictor = nn.Linear(
-                    n_features, self.num_concepts, bias=True
+                    self.n_features, self.num_concepts, bias=True
                 )
             self.concept_dim = self.num_concepts
 
