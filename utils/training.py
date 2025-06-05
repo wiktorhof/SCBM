@@ -103,7 +103,7 @@ def train_one_epoch_pscbm(
         prints += f"{key}: {value:.3f} "
     print(prints)
     metrics.reset()              
-    return
+    return metrics_dict['total_loss']
 
 def train_one_epoch_scbm(
     train_loader, model, optimizer, mode, metrics, epoch, config, loss_fn, device, run
@@ -527,6 +527,7 @@ def validate_one_epoch_pscbm(
         print(prints)
         print()
         metrics.reset()
+        return metrics_dict['total_loss']
 
 
 

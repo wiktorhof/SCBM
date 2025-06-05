@@ -338,14 +338,19 @@ def train(config):
         if config.model.model == "pscbm" and config.model.cov_type in ("global"):
             print("TRAINING THE PSCBM FOR INTERVENTIONS")
             wandb.define_metric("epoch")
+            wandb.define_metric("train/lr", step_metric="epoch")
+            wandb.define_metric("train/epoch_time", step_metric="epoch")
+            wandb.define_metric("val/epoch_time", step_metric="epoch")
             model.CBM.apply(freeze_module)
             
             #TODO paramters for optimizer and scheduler should be optimized :-) Don't I exaggerate?
             optimizer = create_optimizer(config.model, model)
-            lr_scheduler = optim.lr_scheduler.StepLR(
+            # Reduce lr if training loss stops improving
+            lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
                     optimizer,
-                    step_size=config.model.decrease_every,
-                    gamma=1 / config.model.lr_divisor,
+                    mode='min',
+                    factor=1 / config.model.lr_divisor,
+                    patience=20
                 )
             intervention_strategy = define_strategy(
                 "simple_perc", train_loader, model, device, config
@@ -371,10 +376,18 @@ def train(config):
                 if epoch % config.model.validate_per_epoch == 0:
                     print("\nEVALUATION ON THE VALIDATION SET:\n")
                     # TODO Implement this function (mimicking training epoch)
-                    validate_one_epoch_pscbm(
+                    val_start_time = time.perf_counter()
+                    validation_loss = validate_one_epoch_pscbm(
                         interventions_validation_dataset, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
                     )
-                train_one_epoch_pscbm(
+                    val_end_time = time.perf_counter()
+                    val_time = val_end_time - val_start_time
+                    print(f"Validating the model took {val_time} s.")
+                    if validation_loss < best_validation_loss:
+                        torch.save(model.sigma_concepts, join(experiment_path, "best_covariance.pth"))
+
+                train_start_time = time.perf_counter()
+                training_loss = train_one_epoch_pscbm(
                     train_loader, 
                     model, 
                     optimizer, 
@@ -386,7 +399,14 @@ def train(config):
                     device, 
                     run,
                     )
-                lr_scheduler.step()
+                train_end_time = time.perf_counter()
+                train_time = train_end_time - train_start_time
+                print(f"Training the model for 1 epoch took {train_time} s.")
+                lr_scheduler.step(training_loss)
+                run.log({"train/lr": lr_scheduler.get_last_lr(),
+                        "train/epoch_time": train_time,
+                        "val/epoch_time": val_time,
+                    })
                 # model2 = create_model(config)
                 # for (name1, param1), (name2, param2) in zip(model.named_parameters(), model2.named_parameters()):
                 #     print(f"{name1}: equal" if param1.data.equal(param2.data) else f"{name1}: different") 
@@ -394,9 +414,11 @@ def train(config):
             if config.save_model:
                 torch.save(model.state_dict(), join(experiment_path, "model.pth"))
                 OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
-                print("\nTRAINING FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, "model.pth")}", flush=True)
+                print(f"\nTRAINING FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, 'model.pth')}", flush=True)
             else:
                 print("\nTRAINING FINISHED", flush=True)
+            # Report the total training time
+            print(f"Training the model for {epoch} epochs took {time.strftime('%H:%M:%S', time.gmtime(time.perf_counter()-start_time))}")
         indices = list(range(4*test_loader.batch_size))
         debug_dataset = Subset(test_loader.dataset, indices)
         debug_loader = DataLoader(
