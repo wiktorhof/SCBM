@@ -1,8 +1,4 @@
 #!/bin/bash
-
-now=$(date +%y:%m:%d:%H:%M)
-output_filename=~/Desktop/scbm/job_outputs/$now.txt
-
 #Lines that start with SBATCH are merely comments for bash. I cannot use variables there
 #SBATCH --job-name=CBM
 #SBATCH --output="/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/job-%J"

@@ -338,14 +338,19 @@ def train(config):
         if config.model.model == "pscbm" and config.model.cov_type in ("global"):
             print("TRAINING THE PSCBM FOR INTERVENTIONS")
             wandb.define_metric("epoch")
+            wandb.define_metric("train/lr", step_metric="epoch")
+            wandb.define_metric("train/epoch_time", step_metric="epoch")
+            wandb.define_metric("val/epoch_time", step_metric="epoch")
             model.CBM.apply(freeze_module)
             
             #TODO paramters for optimizer and scheduler should be optimized :-) Don't I exaggerate?
             optimizer = create_optimizer(config.model, model)
-            lr_scheduler = optim.lr_scheduler.StepLR(
+            # Reduce lr if training loss stops improving
+            lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
                     optimizer,
-                    step_size=config.model.decrease_every,
-                    gamma=1 / config.model.lr_divisor,
+                    mode='min',
+                    factor=1 / config.model.lr_divisor,
+                    patience=20
                 )
             intervention_strategy = define_strategy(
                 "simple_perc", train_loader, model, device, config
@@ -365,16 +370,26 @@ def train(config):
                 run,
             )
             end_time = time.perf_counter()
+            best_validation_loss = torch.inf
             print(f"Dataset has been generated in {(end_time - start_time):.2f} seconds.")
             for epoch in range(config.model.i_epochs):
                 # Validate the model periodically
                 if epoch % config.model.validate_per_epoch == 0:
                     print("\nEVALUATION ON THE VALIDATION SET:\n")
                     # TODO Implement this function (mimicking training epoch)
-                    validate_one_epoch_pscbm(
+                    val_start_time = time.perf_counter()
+                    validation_loss = validate_one_epoch_pscbm(
                         interventions_validation_dataset, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
                     )
-                train_one_epoch_pscbm(
+                    val_end_time = time.perf_counter()
+                    val_time = val_end_time - val_start_time
+                    print(f"Validating the model took {val_time} s.")
+                    if validation_loss < best_validation_loss:
+                        best_validation_loss = validation_loss
+                        torch.save(model.sigma_concepts, join(experiment_path, "best_covariance.pth"))
+
+                train_start_time = time.perf_counter()
+                training_loss = train_one_epoch_pscbm(
                     train_loader, 
                     model, 
                     optimizer, 
@@ -394,7 +409,7 @@ def train(config):
             if config.save_model:
                 torch.save(model.state_dict(), join(experiment_path, "model.pth"))
                 OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
-                print("\nTRAINING FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, "model.pth")}", flush=True)
+                print("\nTRAINING FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, 'model.pth')}", flush=True)
             else:
                 print("\nTRAINING FINISHED", flush=True)
         # Intervention curves

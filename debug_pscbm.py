@@ -31,7 +31,8 @@ from utils.training import (
     train_one_epoch_pscbm,
     validate_one_epoch_cbm,
     validate_one_epoch_scbm,
-    create_validation_dataset_pscbm,
+    generate_training_dataloader_pscbm,
+    create_validation_dataloader_pscbm,
     validate_one_epoch_pscbm,
     Custom_Metrics,
 )
@@ -359,7 +360,7 @@ def train(config):
             )
             print("Generating a dataset for interventions validation...")
             start_time = time.perf_counter()
-            interventions_validation_dataset = create_validation_dataset_pscbm(
+            interventions_validation_dataloader = create_validation_dataloader_pscbm(
                 val_loader,
                 model,
                 metrics,
@@ -370,25 +371,47 @@ def train(config):
                 run,
             )
             end_time = time.perf_counter()
-            print(f"Dataset has been generated in {(end_time - start_time):.2f} seconds.")
+            best_validation_loss = torch.inf
+            print(f"Validation dataset has been generated in {(end_time - start_time):.2f} seconds.")
+            generation_start_time = time.perf_counter()
+            interventions_training_dataloader = generate_training_dataloader_pscbm(train_loader, model, 0, config, device, run)
+            generation_end_time = time.perf_counter()
+            print(f"Training dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
             for epoch in range(config.model.i_epochs):
+                # Calculate intervention curves during training and log them in a separate run:
+                if epoch % config.model.curves_every == 0:
+                    with wandb.init(
+                        project=config.logging.project,
+                        reinit=True,
+                        entity=config.logging.entity,
+                        config=OmegaConf.to_container(config, resolve=True),
+                        mode=config.logging.mode,
+                        tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
+                    ) as interventions_run:
+                        if config.logging.mode in ["online", "disabled"]:
+                            interventions_run.name = run.name.split("-")[-1] + "-" + config.experiment_name + "epoch_" + str(epoch)
+                        else:
+                            interventions_run.name = config.experiment_name + "epoch_" + str(epoch)
+                        intervene(
+                            train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
+                        )
                 # Validate the model periodically
                 if epoch % config.model.validate_per_epoch == 0:
                     print("\nEVALUATION ON THE VALIDATION SET:\n")
-                    # TODO Implement this function (mimicking training epoch)
                     val_start_time = time.perf_counter()
                     validation_loss = validate_one_epoch_pscbm(
-                        interventions_validation_dataset, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
+                        interventions_validation_dataloader, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
                     )
                     val_end_time = time.perf_counter()
                     val_time = val_end_time - val_start_time
-                    print(f"Validating the model took {val_time} s.")
+                    print(f"Validating the model took {val_time:.2f} s.")
                     if validation_loss < best_validation_loss:
+                        best_validation_loss = validation_loss
                         torch.save(model.sigma_concepts, join(experiment_path, "best_covariance.pth"))
 
                 train_start_time = time.perf_counter()
                 training_loss = train_one_epoch_pscbm(
-                    train_loader, 
+                    interventions_training_dataloader, 
                     model, 
                     optimizer, 
                     metrics, 
@@ -401,12 +424,13 @@ def train(config):
                     )
                 train_end_time = time.perf_counter()
                 train_time = train_end_time - train_start_time
-                print(f"Training the model for 1 epoch took {train_time} s.")
+                print(f"Training the model for 1 epoch took {train_time:.2f} s.")
                 lr_scheduler.step(training_loss)
                 run.log({"train/lr": lr_scheduler.get_last_lr(),
                         "train/epoch_time": train_time,
                         "val/epoch_time": val_time,
                     })
+                
                 # model2 = create_model(config)
                 # for (name1, param1), (name2, param2) in zip(model.named_parameters(), model2.named_parameters()):
                 #     print(f"{name1}: equal" if param1.data.equal(param2.data) else f"{name1}: different") 
@@ -418,7 +442,7 @@ def train(config):
             else:
                 print("\nTRAINING FINISHED", flush=True)
             # Report the total training time
-            print(f"Training the model for {epoch} epochs took {time.strftime('%H:%M:%S', time.gmtime(time.perf_counter()-start_time))}")
+            print(f"Training the model for {epoch} epochs took {time.strftime('%H:%M:%S', time.gmtime(train_end_time-start_time))}")
         indices = list(range(4*test_loader.batch_size))
         debug_dataset = Subset(test_loader.dataset, indices)
         debug_loader = DataLoader(

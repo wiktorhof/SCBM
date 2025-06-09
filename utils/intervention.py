@@ -61,13 +61,16 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                         c_cov,
                     ) = model(batch_features, epoch, validation=True)
                     concepts_pred_logits = torch.logit(concepts_pred_probs, eps=1e-6)
+                    concepts_mcmc_probs = concepts_pred_probs.unsqueeze(-1)
 
                     # Calculate loss before intervention
-                    target_loss, concepts_loss, total_loss = loss_fn(
-                        concepts_pred_probs,
+                    target_loss, concepts_loss, prec_loss, total_loss = loss_fn(
+                        concepts_mcmc_probs,
                         concepts_true,
                         target_pred_logits,
                         target_true,
+                        c_cov,
+                        cov_not_triang=True,
                     )
                     # if model.cov_type in ("empirical_true", "empirical_predicted", "identity"):
                     #     c_cov = model.covariance
@@ -88,6 +91,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                         concepts_true,
                         concepts_pred_probs,
                         cov_norm=c_cov_norm,
+                        prec_loss=prec_loss,
                     )
 
                     intervention_dataset_base.append(
@@ -211,11 +215,11 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                                 concepts_mask,
                             )
                             concepts_pred_logits_interv = c_mcmc_logits.mean(-1)
-                            concepts_pred_probs_interv = c_mcmc_probs.mean(-1)
+                            # concepts_pred_probs_interv = c_mcmc_probs.mean(-1)
                             c_norm = torch.norm(concepts_cov_interv) / (concepts_cov_interv.numel() ** 0.5)
                             y_pred_intervened = model.intervene(concepts_pred_logits_interv, concepts_mask, input_features, concepts_true)
 
-                            target_loss, concepts_loss, total_loss = loss_fn(concepts_pred_probs_interv, concepts_true, y_pred_intervened, target_true)
+                            target_loss, concepts_loss, prec_loss, total_loss = loss_fn(c_mcmc_probs, concepts_true, y_pred_intervened, target_true, concepts_cov_interv, cov_not_triang=True)
 
                             # Store predictions
                             metrics.update(
@@ -227,6 +231,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                                 concepts_true,
                                 concepts_pred_probs_interv,
                                 cov_norm=c_norm,
+                                prec_loss=prec_loss,
                             )
 
                             updated_intervention_dataset.append([

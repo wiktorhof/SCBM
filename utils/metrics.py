@@ -258,3 +258,8 @@ def brier_score(y_true, y_prob):
         return sc
     elif len(y_prob.shape) == 1:
         return np.mean((y_prob - y_true) ** 2)
+
+def create_wandb_table(config):
+
+    columns = ["dataset", "model", "covariance_type", "seed"]
+    pass

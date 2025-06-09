@@ -13,14 +13,14 @@ concept_learning: 'hard' # Characteristics of concept bottleneck, either hard {0
 # I will then also want to use CEM.
 i_epochs: 1000 # The number of epochs for which the covariance matrix is fine-tuned. These are many for now, I will observe, how many are actually needed.
 validate_per_epoch: 10 # More frequent to observe the behaviour better
+curves_every: 100 # How frequently to calculate intervention curves. They are calculated not only after the full training, in order to monitor how the model's intervention performance develops over time.
 
 learning_rate: 0.0001 # Learning rate in the optimization
 optimizer: 'adam' # Optimizer: ['sgd','adam']
-decrease_every: 150 # Frequency of the learning rate decrease
 lr_divisor: 2 # Rate of the learning rate decrease
 weight_decay: 0 # Weight decay
-train_batch_size: 64 # Batch size for the training set
-val_batch_size: 64 # Batch size for the validation and test sets
+train_batch_size: 128 # Batch size for the training set
+val_batch_size: 128 # Batch size for the validation and test sets
 
 # Covariance
 cov_type: 'global' # Covariance specification. Empirical_true computes the empirical covariance over the true labels of the training set and fixes it.
@@ -28,7 +28,7 @@ cov_type: 'global' # Covariance specification. Empirical_true computes the empir
 reg_precision: 'None' # Regularization strategy of covariance ['l1', None] if it is learned
 reg_weight: 1 # Regularization strength if reg_precision is not None
 data_ratio: 1 # Low ratio for debugging purposes
-covariance_scaling: 8
+covariance_scaling: 1.0001 # Enough
 # --------------------------
 #         Policy
 # --------------------------
@@ -36,4 +36,8 @@ inter_policy: 'random,prob_unc' # Comma-separated intervention policies to deter
 inter_strategy: 'hard,simple_perc,emp_perc,conf_interval_optimal' 
 # Comma-separated intervention strategies to determine how to perform interventions. Combinable options: ['simple_perc', 'emp_perc', 'conf_interval_optimal']
 level: 0.99 # Confidence level for confidence interval based intervention strategy
-
+# --------------------------
+# For simpler comparison of policy-strategy pairs, 1-number metrics will be
+# calculated. Specifically, concept, complete concept and target accuracy after
+# 1 intervention and area under curve until a specific percentile of interventions
+auc_thresholds: [0.05,0.1,0.15,0.2,0.25,0.3,0.5,0.75,1]
