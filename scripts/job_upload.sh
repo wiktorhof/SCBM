@@ -1,18 +1,30 @@
 #!/bin/bash
-
+eval "$(conda shell.bash hook)"
+conda activate scbm
 today=$(date +%y-%m-%d)
-
-output_file=/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/$today/job-%J.txt
+export WANDB_API_KEY=local-be0546acbdda04d2949d57a384bcb9552c9aede7
+output_dir=/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/$today
+output_file=${output_dir}/job-%J.txt
+if [ ! -d ${output_dir} ]; then echo Creating log directory for $today.; mkdir ${output_dir};
+else echo Log directory exists already.;
+fi
 
 data='CUB'
 mem='20G'
 encoder_arch='resnet18'
-model='CBM'
+model='PSCBM'
 i=42
-concept_learning='hard'
-tag=${model}_${concept_learning}
+#concept_learning='hard'
 
 save_model='True'
 save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
+cd /cluster/home/wiktorh/Desktop/scbm/scripts/
+echo Submitting job
 
-sbatch --output=${output_file} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${model}_${i}" seed=$i logging.project=PSCBM logging.mode=offline model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch model.j_epochs=150 model.c_epochs=100 model.t_epochs=50 save_model=${save_model} experiment_dir=${save_model_dir}
+for concept_learning in 'hard'
+do
+tag=${model}_${concept_learning}
+sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir}
+echo Job submitted
+done;
+                                                                                                                                                                 
