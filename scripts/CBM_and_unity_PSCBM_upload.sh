@@ -14,18 +14,37 @@ mem='20G'
 encoder_arch='resnet18'
 model='PSCBM'
 i=42
-#concept_learning='hard'
+concept_learning='hard'
 
 save_model='False'
 save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 
+# Hard PSCBM
 tag=${model}_${concept_learning}_${data}_identity
-sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True model.cov_type=indentity model.training_mode=joint ++model.CBM_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250402-115252_3c2ab/model.pth
+sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i \
+model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir} \
+model.load_weights=True model.cov_type=identity model.training_mode=joint model.inter_policy='random' model.inter_strategy='hard' \
+++model.CBM_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250402-115252_3c2ab/model.pth
 echo Job submitted
 
+# Hard CBM
 model='CBM'
 tag=${model}_${concept_learning}_${data}_baseline
-sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True model.training_mode=joint ++model.weights_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250402-115252_3c2ab/model.pth
+sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i \
+model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir} \
+model.load_weights=True model.training_mode=joint model.inter_policy='random' model.inter_strategy='hard' \
+++model.weights_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250402-115252_3c2ab/model.pth
+echo Job submitted
+
+# Soft PSCBM
+model='PSCBM'
+concept_learning='soft'
+tag=${model}_${concept_learning}_${data}_identity
+sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i \
+model.tag=$tag model.concept_learning=soft model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir} \
+model.load_weights=True model.cov_type=identity model.training_mode=joint model.inter_policy='random' model.inter_strategy='simple_perc,emp_perc'
+echo Job submitted
+
 echo All jobs submitted
