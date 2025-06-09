@@ -141,7 +141,12 @@ def train_one_epoch_pscbm(
     model evaluation: {model_time:.2f}s
     masks creation: {mask_time:.2f}s
     interventions: {interventions_time:.2f}s
-    """)              
+    """)   
+    run.log({
+        "train/model_evaluation_time": model_time,
+        "train/masks_creation_time": mask_time,
+        "interventions_time": interventions_time,
+        })           
     return metrics_dict['total_loss']
 
 def train_one_epoch_scbm(

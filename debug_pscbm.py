@@ -342,6 +342,9 @@ def train(config):
             wandb.define_metric("train/lr", step_metric="epoch")
             wandb.define_metric("train/epoch_time", step_metric="epoch")
             wandb.define_metric("val/epoch_time", step_metric="epoch")
+            wandb.define_metric("train/model_evaluation_time", step_metric="epoch")
+            wandb.define_metric("train/masks_creation_time", step_metric="epoch")
+            wandb.define_metric("train/interventions_time", step_metric="epoch")
             model.CBM.apply(freeze_module)
             
             #TODO paramters for optimizer and scheduler should be optimized :-) Don't I exaggerate?
