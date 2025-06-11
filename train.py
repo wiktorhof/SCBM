@@ -89,7 +89,7 @@ def train(config):
     print("Cache dir:", os.environ["WANDB_CACHE_DIR"])
     with wandb.init(
         project=config.logging.project,
-        reinit=True,
+        reinit="create_new",
         entity=config.logging.entity,
         config=OmegaConf.to_container(config, resolve=True),
         mode=config.logging.mode,
@@ -197,7 +197,7 @@ def train(config):
                 + ": "
                 + str(config.model.concept_learning + "\n")
             )
-            wandb.define_metric("epoch")
+            run.define_metric("epoch")
 
             # Pretraining autoregressive concept structure for AR baseline
             if (
@@ -338,13 +338,13 @@ def train(config):
             )
         if config.model.model == "pscbm" and config.model.cov_type in ("global"):
             print("TRAINING THE PSCBM FOR INTERVENTIONS")
-            wandb.define_metric("epoch")
-            wandb.define_metric("train/lr", step_metric="epoch")
-            wandb.define_metric("train/epoch_time", step_metric="epoch")
-            wandb.define_metric("val/epoch_time", step_metric="epoch")
-            wandb.define_metric("train/model_evaluation_time", step_metric="epoch")
-            wandb.define_metric("train/masks_creation_time", step_metric="epoch")
-            wandb.define_metric("train/interventions_time", step_metric="epoch")
+            run.define_metric("epoch")
+            run.define_metric("train/lr", step_metric="epoch")
+            run.define_metric("train/epoch_time", step_metric="epoch")
+            run.define_metric("validation_cov_training/epoch_time", step_metric="epoch")
+            run.define_metric("train/model_evaluation_time", step_metric="epoch")
+            run.define_metric("train/masks_creation_time", step_metric="epoch")
+            run.define_metric("train/interventions_time", step_metric="epoch")
             model.CBM.apply(freeze_module)
             
             #TODO paramters for optimizer and scheduler should be optimized :-) Don't I exaggerate?
@@ -385,22 +385,22 @@ def train(config):
                 if epoch % config.model.curves_every == 0:
                     with wandb.init(
                         project=config.logging.project,
-                        reinit=True,
+                        reinit="create_new",
                         entity=config.logging.entity,
                         config=OmegaConf.to_container(config, resolve=True),
                         mode=config.logging.mode,
                         tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
                     ) as interventions_run:
                         if config.logging.mode in ["online", "disabled"]:
-                            interventions_run.name = run.name.split("-")[-1] + "-" + config.experiment_name + "epoch_" + str(epoch)
+                            interventions_run.name = run.name.split("-")[0] + "-" + config.experiment_name + "_epoch_" + str(epoch)
                         else:
-                            interventions_run.name = config.experiment_name + "epoch_" + str(epoch)
+                            interventions_run.name = config.experiment_name + "_epoch_" + str(epoch)
                         intervene(
                             train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
                         )
                 # Validate the model periodically
                 if epoch % config.model.validate_per_epoch == 0:
-                    print("\nEVALUATION ON THE VALIDATION SET:\n")
+                    print(f"\nEVALUATION ON THE VALIDATION SET at epoch {epoch}:\n")
                     val_start_time = time.perf_counter()
                     validation_loss = validate_one_epoch_pscbm(
                         interventions_validation_dataloader, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
@@ -429,7 +429,7 @@ def train(config):
                 train_time = train_end_time - train_start_time
                 print(f"Training the model for 1 epoch took {train_time:.2f} s.")
                 lr_scheduler.step(training_loss)
-                run.log({"train/lr": lr_scheduler.get_last_lr(),
+                run.log({"train/lr": lr_scheduler.get_last_lr()[-1],
                         "train/epoch_time": train_time,
                         "val/epoch_time": val_time,
                     })

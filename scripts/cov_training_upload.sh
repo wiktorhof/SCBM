@@ -6,6 +6,9 @@ today=$(date +%y-%m-%d)
 export WANDB_API_KEY=local-be0546acbdda04d2949d57a384bcb9552c9aede7
 output_dir=/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/$today
 output_file=${output_dir}/job-%J.txt
+if [ ! -d ${output_dir} ]; then echo Creating log directory for $today.; mkdir ${output_dir};
+else echo Log directory exists already.;
+fi
 
 data='CUB'
 mem='20G'

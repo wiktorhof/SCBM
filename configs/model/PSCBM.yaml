@@ -13,7 +13,7 @@ concept_learning: 'hard' # Characteristics of concept bottleneck, either hard {0
 # I will then also want to use CEM.
 i_epochs: 1000 # The number of epochs for which the covariance matrix is fine-tuned. These are many for now, I will observe, how many are actually needed.
 validate_per_epoch: 10 # More frequent to observe the behaviour better
-curves_every: 100 # How frequently to calculate intervention curves. They are calculated not only after the full training, in order to monitor how the model's intervention performance develops over time.
+curves_every: 10 # How frequently to calculate intervention curves. They are calculated not only after the full training, in order to monitor how the model's intervention performance develops over time.
 
 learning_rate: 0.0001 # Learning rate in the optimization
 optimizer: 'adam' # Optimizer: ['sgd','adam']
@@ -25,15 +25,15 @@ val_batch_size: 128 # Batch size for the validation and test sets
 # Covariance
 cov_type: 'global' # Covariance specification. Empirical_true computes the empirical covariance over the true labels of the training set and fixes it.
 # Empirical_predicted computes the covariance over concepts predicted by the model's encoder ['empirical_true', 'empirical_predicted', 'global']
-reg_precision: 'None' # Regularization strategy of covariance ['l1', None] if it is learned
+reg_precision: 'l1' # Regularization strategy of covariance ['l1', None] if it is learned
 reg_weight: 1 # Regularization strength if reg_precision is not None
 data_ratio: 1 # Low ratio for debugging purposes
 covariance_scaling: 1.0001 # Enough
 # --------------------------
 #         Policy
 # --------------------------
-inter_policy: 'random,prob_unc' # Comma-separated intervention policies to determine which concept to intervene. Combinable options: ['random','prob_unc']
-inter_strategy: 'hard,simple_perc,emp_perc,conf_interval_optimal' 
+inter_policy: 'random' # Comma-separated intervention policies to determine which concept to intervene. Combinable options: ['random','prob_unc']
+inter_strategy: 'hard' 
 # Comma-separated intervention strategies to determine how to perform interventions. Combinable options: ['simple_perc', 'emp_perc', 'conf_interval_optimal']
 level: 0.99 # Confidence level for confidence interval based intervention strategy
 # --------------------------

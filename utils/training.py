@@ -86,6 +86,7 @@ def train_one_epoch_pscbm(
         assert (
         (masks.sum(dim=2)==num_ones).all()
         )
+        masks = masks.to(device)
         timestamp3 = perf_counter()
         mask_time += (timestamp3-timestamp2)
         concepts_pred_mu = torch.logit(concepts_pred_probs, eps=1e-6)
@@ -145,7 +146,7 @@ def train_one_epoch_pscbm(
     run.log({
         "train/model_evaluation_time": model_time,
         "train/masks_creation_time": mask_time,
-        "interventions_time": interventions_time,
+        "train/interventions_time": interventions_time,
         })           
     return metrics_dict['total_loss']
 
@@ -244,7 +245,7 @@ def train_one_epoch_scbm(
     metrics_dict = metrics.compute()
     if epoch == 0:
         for i, (k, v) in enumerate(metrics_dict.items()):
-            wandb.define_metric(f"train/{k}", step_metric="epoch")
+            run.define_metric(f"train/{k}", step_metric="epoch")
     log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
     log_dict.update({"epoch": epoch + 1})
     run.log(log_dict)
@@ -351,7 +352,7 @@ def train_one_epoch_cbm(
     metrics_dict = metrics.compute()
     if epoch == 0:
         for i, (k, v) in enumerate(metrics_dict.items()):
-            wandb.define_metric(f"train/{k}", step_metric="epoch")
+            run.define_metric(f"train/{k}", step_metric="epoch")
     log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
     log_dict.update({"epoch": epoch + 1})
     run.log(log_dict)
@@ -551,7 +552,7 @@ def validate_one_epoch_pscbm(
         if not test:
             if epoch == 0:
                 for (k,v) in metrics_dict.items():
-                    wandb.define_metric(f"validation_cov_training/{k}", step_metric="epoch")
+                    run.define_metric(f"validation_cov_training/{k}", step_metric="epoch")
             log_dict = {f"validation_cov_training/{k}": v for (k, v) in metrics_dict.items()}
             log_dict.update({"epoch": epoch})
             run.log(log_dict)
@@ -559,7 +560,7 @@ def validate_one_epoch_pscbm(
         else:
             if epoch == 0:
                 for (k,v) in metrics_dict.items():
-                    wandb.define_metric(f"test_cov_training/{k}", step_metric="epoch")
+                    run.define_metric(f"test_cov_training/{k}", step_metric="epoch")
             log_dict = {f"test_cov_training/{k}": v for (k, v) in metrics_dict.items()}
             log_dict.update({"epoch": epoch})
             run.log(log_dict)
@@ -673,7 +674,7 @@ def validate_one_epoch_scbm(
     if not test:
         if epoch == 0:
             for (k,v) in metrics_dict.items():
-                wandb.define_metric(f"validation/{k}", step_metric="epoch")
+                run.define_metric(f"validation/{k}", step_metric="epoch")
         log_dict = {f"validation/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch})
         run.log(log_dict)
@@ -681,7 +682,7 @@ def validate_one_epoch_scbm(
     else:
         if epoch == 0:
             for (k,v) in metrics_dict.items():
-                wandb.define_metric(f"test/{k}", step_metric="epoch")
+                run.define_metric(f"test/{k}", step_metric="epoch")
         log_dict = {f"test/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch})
         run.log(log_dict)
@@ -775,7 +776,7 @@ def validate_one_epoch_cbm(
     if not test:
         if epoch == 0:
             for (k, v) in metrics_dict.items():
-                wandb.define_metric(f"validation/{k}", step_metric="epoch")
+                run.define_metric(f"validation/{k}", step_metric="epoch")
         log_dict = {f"validation/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch})
         run.log(log_dict)
@@ -783,7 +784,7 @@ def validate_one_epoch_cbm(
     else:
         if epoch == 0:
             for (k, v) in metrics_dict.items():
-                wandb.define_metric(f"test/{k}", step_metric="epoch")
+                run.define_metric(f"test/{k}", step_metric="epoch")
         log_dict = {f"test/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch})
         run.log(log_dict)
