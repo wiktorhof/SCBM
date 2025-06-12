@@ -336,7 +336,7 @@ def train(config):
                 test=True,
                 concept_names_graph=concept_names_graph,
             )
-        if config.model.model == "pscbm" and config.model.cov_type in ("global"):
+        if config.model.model == "pscbm" and config.model.cov_type in ("global", "amortized"):
             print("TRAINING THE PSCBM FOR INTERVENTIONS")
             run.define_metric("epoch")
             run.define_metric("train/lr", step_metric="epoch")
@@ -372,6 +372,7 @@ def train(config):
                 loss_fn,
                 device,
                 run,
+                num_masks=config.model.num_masks_val
             )
             end_time = time.perf_counter()
             best_validation_loss = torch.inf
@@ -424,6 +425,7 @@ def train(config):
                     loss_fn, 
                     device, 
                     run,
+                    num_masks=config.model.num_masks_train,
                     )
                 train_end_time = time.perf_counter()
                 train_time = train_end_time - train_start_time

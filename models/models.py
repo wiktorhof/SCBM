@@ -201,7 +201,7 @@ class PSCBM(nn.Module):
             raise NotImplementedError("Other covariance types are not implemented.")
 
 
-    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False):
+    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False, return_intermediate=False):
         """
         args:
         intermediate: if we are only interested in calculating the covariance, we can pass the encoder's features s.t. they don't have to be reevaluated.
@@ -211,9 +211,11 @@ class PSCBM(nn.Module):
         concepts
         concepts_cov: in full form, not triangular - This is my design choice
         """
-        if not cov_only:
+        if cov_only:
+            concepts_pred_probs, target_pred_logits, concepts = None, None, None
+        else:
             # Get intermediate representation for calculating amortized covariance
-            if self.cov_type == "amortized":
+            if self.cov_type == "amortized" or return_intermediate:
                 concepts_pred_probs, target_pred_logits, concepts, intermediate = self.CBM(x, epoch, c_true=c_true, validation=validation, return_intermediate=True)
             # If covariance isn't amortized, the intermediate representation is not needed
             else:
@@ -247,8 +249,11 @@ class PSCBM(nn.Module):
         # concepts_cov = numerical_stability_check(concepts_cov)
         # concepts_pred_logits=torch.logit(concepts_pred_probs, eps=1e-6)
         # cov_only is useful for validation of covariance training where mu's are always the same and only the covariance changes.
-        if cov_only:
-            return None, None, None, concepts_cov
+        # return intermediate is useful if we are creating a training / validation dataset for amortized covariance
+        if return_intermediate:
+            if intermediate is None:
+                intermediate = self.encoder(x)
+            return concepts_pred_probs, target_pred_logits, concepts, concepts_cov, intermediate
         else:
             return concepts_pred_probs, target_pred_logits, concepts, concepts_cov
 

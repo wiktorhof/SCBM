@@ -9,11 +9,11 @@ load_CBM: True
 load_weights: True
 model: 'pscbm' # Model's name
 tag: 'pscbm' # Model's tag for wandb logging
-concept_learning: 'hard' # Characteristics of concept bottleneck, either hard {0,1}, or soft logits ['hard', 'soft', 'cem']
+concept_learning: 'soft' # Characteristics of concept bottleneck, either hard {0,1}, or soft logits ['hard', 'soft', 'cem']
 # I will then also want to use CEM.
 i_epochs: 1000 # The number of epochs for which the covariance matrix is fine-tuned. These are many for now, I will observe, how many are actually needed.
-validate_per_epoch: 10 # More frequent to observe the behaviour better
-curves_every: 10 # How frequently to calculate intervention curves. They are calculated not only after the full training, in order to monitor how the model's intervention performance develops over time.
+validate_per_epoch: 5 # More frequent to observe the behaviour better
+curves_every: 5 # How frequently to calculate intervention curves. They are calculated not only after the full training, in order to monitor how the model's intervention performance develops over time.
 
 learning_rate: 0.0001 # Learning rate in the optimization
 optimizer: 'adam' # Optimizer: ['sgd','adam']
@@ -29,15 +29,15 @@ reg_precision: 'l1' # Regularization strategy of covariance ['l1', None] if it i
 reg_weight: 1 # Regularization strength if reg_precision is not None
 data_ratio: 1 # Low ratio for debugging purposes
 covariance_scaling: 1.0001 # Enough
+# Covariance training
+num_masks_train: 10
+num_masks_val: 10
+mask_density: [0.01,0.25]
 # --------------------------
 #         Policy
 # --------------------------
-inter_policy: 'random' # Comma-separated intervention policies to determine which concept to intervene. Combinable options: ['random','prob_unc']
-inter_strategy: 'hard' 
+inter_policy: 'random,prob_unc' # Comma-separated intervention policies to determine which concept to intervene. Combinable options: ['random','prob_unc']
+inter_strategy: 'hard,simple_perc,emp_perc' 
 # Comma-separated intervention strategies to determine how to perform interventions. Combinable options: ['simple_perc', 'emp_perc', 'conf_interval_optimal']
 level: 0.99 # Confidence level for confidence interval based intervention strategy
 # --------------------------
-# For simpler comparison of policy-strategy pairs, 1-number metrics will be
-# calculated. Specifically, concept, complete concept and target accuracy after
-# 1 intervention and area under curve until a specific percentile of interventions
-auc_thresholds: [0.05,0.1,0.15,0.2,0.25,0.3,0.5,0.75,1]

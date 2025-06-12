@@ -165,10 +165,6 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
             intervention_dataset = TensorDataset(
                 *intervention_dataset_base, concepts_dataset_mask, *intervention_dataset_fixed
             )
-            # DEBUG:
-            # cov_list = []
-            # mu_list = []
-            # mask_list = []
 
             for num_intervened in range(1, num_interventions + 1):
                 intervention_loader = DataLoader(

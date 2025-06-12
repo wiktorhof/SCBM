@@ -14,8 +14,7 @@ data='CUB'
 mem='20G'
 encoder_arch='resnet18'
 model='PSCBM'
-i=9431
-concept_learning='hard'
+
 cov='global'
 
 save_model='True'
@@ -25,12 +24,18 @@ echo Submitting job
 
 data_ratio=1
 covariance_scaling=1.0001
-
+concept_learning='hard'
+for num_masks_train in 1 2 5 20
+do
+for i in 42
+do
 tag=${model}_${concept_learning}_${cov}
 sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
 +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
 model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
 save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
 model.cov_type=${cov} model.data_ratio=${data_ratio} model.covariance_scaling=${covariance_scaling} \
-model.inter_policy=\'prob_unc,random\' model.inter_strategy=\'hard,simple_perc,emp_perc,conf_interval_optimal\' \
-model.training_mode='joint'
+model.inter_policy=\'prob_unc,random\' model.inter_strategy=\'hard,simple_perc,emp_perc\' \
+model.training_mode='joint' model.num_masks_train=${num_masks_train}
+done
+done
