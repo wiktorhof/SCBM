@@ -201,20 +201,31 @@ class PSCBM(nn.Module):
             raise NotImplementedError("Other covariance types are not implemented.")
 
 
-    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, cov_only=False):
+    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False):
         """
+        args:
+        intermediate: if we are only interested in calculating the covariance, we can pass the encoder's features s.t. they don't have to be reevaluated.
         Returns:
         concepts_pred_probs
         target_pred_logits
         concepts
         concepts_cov: in full form, not triangular - This is my design choice
         """
+        if not cov_only:
+            # Get intermediate representation for calculating amortized covariance
+            if self.cov_type == "amortized":
+                concepts_pred_probs, target_pred_logits, concepts, intermediate = self.CBM(x, epoch, c_true=c_true, validation=validation, return_intermediate=True)
+            # If covariance isn't amortized, the intermediate representation is not needed
+            else:
+                concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
         if self.cov_type.startswith("empirical") or self.cov_type == "identity":
             concepts_cov = self.covariance.repeat(x.shape[0],1)
         elif self.cov_type == "global":
             c_sigma_triang = self.sigma_concepts.repeat(x.shape[0], 1)
         elif self.cov_type == "amortized":
-            intermediate = self.encoder(x)
+            # This condition is only triggered if cov_only=True and intermediate=None
+            if intermediate is None:
+                intermediate = self.encoder(x)
             c_sigma_triang = self.sigma_concepts(intermediate)
         if not (self.cov_type.startswith("empirical") or self.cov_type == "identity"):
             # Create a lower-triangular matrix
@@ -239,7 +250,6 @@ class PSCBM(nn.Module):
         if cov_only:
             return None, None, None, concepts_cov
         else:
-            concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
             return concepts_pred_probs, target_pred_logits, concepts, concepts_cov
 
     def intervene(self, concepts_intervened_logits, c_mask, input_features, c_true):
@@ -756,6 +766,7 @@ class CBM(nn.Module):
         c_true=None,
         validation=False,
         concepts_train_ar=False,
+        return_intermediate=False,
     ):
         """
         Perform a forward pass through one of the baselines.
@@ -769,6 +780,8 @@ class CBM(nn.Module):
             c_true (torch.Tensor, optional): The ground-truth concept values. Required for "independent" training mode. Default is None.
             validation (bool, optional): Flag indicating whether this is a validation pass. Default is False.
             concepts_train_ar (torch.Tensor, optional): Ground-truth concept values for autoregressive training. Default is False.
+            return_intermediate (bool, optional): Flag indicating whether to also return the encoder's intermediate values.
+            This can be useful if we need to calculate amortized covariance based on this CBM.
 
         Returns:
             tuple: A tuple containing:
@@ -934,7 +947,10 @@ class CBM(nn.Module):
             # If CEM: c are predicte embeddings, if AR: c are ground truth concepts
             y_pred_logits = self.head(c)
 
-        return c_prob, y_pred_logits, c
+        if return_intermediate:
+            return c_prob, y_pred_logits, c, intermediate
+        else:
+            return c_prob, y_pred_logits, c
 
     def intervene(
         self,
