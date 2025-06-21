@@ -346,6 +346,13 @@ def train(config):
             run.define_metric("train/masks_creation_time", step_metric="epoch")
             run.define_metric("train/interventions_time", step_metric="epoch")
             model.CBM.apply(freeze_module)
+            learnable_parameters = ""
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    learnable_parameters += f"{name}\n"
+                    run.define_metric(f"train/{name}_gradient_norm", step_metric="epoch")
+
+            print(f"Learnable parameters:\n{learnable_parameters}")
             
             #TODO paramters for optimizer and scheduler should be optimized :-) Don't I exaggerate?
             optimizer = create_optimizer(config.model, model)
@@ -354,8 +361,13 @@ def train(config):
                     optimizer,
                     mode='min',
                     factor=1 / config.model.lr_divisor,
-                    patience=20
+                    patience=10
                 )
+            # If training an amortized covariance, I expect improvement from reducing the learning rate after 10 epochs
+            if config.model.get("use_sequential_lr", False):
+                initial_scheduler = optim.lr_scheduler.ConstantLR(optimizer, factor=10, total_iters=10)
+                lr_scheduler = optim.lr_scheduler.SequentialLR(optimizer, schedulers=[initial_scheduler, lr_scheduler], milestones=[10])
+
             intervention_strategy = define_strategy(
                 "simple_perc", train_loader, model, device, config
             ) if model.concept_learning == 'soft' else define_strategy(
@@ -372,7 +384,8 @@ def train(config):
                 loss_fn,
                 device,
                 run,
-                num_masks=config.model.num_masks_val
+                num_masks=config.model.num_masks_val,
+                mask_density=config.model.mask_density_val,
             )
             end_time = time.perf_counter()
             best_validation_loss = torch.inf
@@ -383,22 +396,22 @@ def train(config):
             print(f"Training dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
             for epoch in range(config.model.i_epochs):
                 # Calculate intervention curves during training and log them in a separate run:
-                if epoch % config.model.curves_every == 0:
-                    with wandb.init(
-                        project=config.logging.project,
-                        reinit="create_new",
-                        entity=config.logging.entity,
-                        config=OmegaConf.to_container(config, resolve=True),
-                        mode=config.logging.mode,
-                        tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
-                    ) as interventions_run:
-                        if config.logging.mode in ["online", "disabled"]:
-                            interventions_run.name = run.name.split("-")[0] + "-" + config.experiment_name + "_epoch_" + str(epoch)
-                        else:
-                            interventions_run.name = config.experiment_name + "_epoch_" + str(epoch)
-                        intervene(
-                            train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
-                        )
+                # if epoch % config.model.curves_every == 0:
+                #     with wandb.init(
+                #         project=config.logging.project,
+                #         reinit="create_new",
+                #         entity=config.logging.entity,
+                #         config=OmegaConf.to_container(config, resolve=True),
+                #         mode=config.logging.mode,
+                #         tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
+                #     ) as interventions_run:
+                #         if config.logging.mode in ["online", "disabled"]:
+                #             interventions_run.name = run.name.split("-")[0] + "-" + config.experiment_name + "_epoch_" + str(epoch)
+                #         else:
+                #             interventions_run.name = config.experiment_name + "_epoch_" + str(epoch)
+                #         intervene(
+                #             train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
+                #         )
                 # Validate the model periodically
                 if epoch % config.model.validate_per_epoch == 0:
                     print(f"\nEVALUATION ON THE VALIDATION SET at epoch {epoch}:\n")
@@ -412,6 +425,9 @@ def train(config):
                     if validation_loss < best_validation_loss:
                         best_validation_loss = validation_loss
                         torch.save(model.sigma_concepts, join(experiment_path, "best_covariance.pth"))
+                    run.log({
+                        "validation_cov_training/epoch_time": val_time,
+                        })
 
                 train_start_time = time.perf_counter()
                 training_loss = train_one_epoch_pscbm(
@@ -426,6 +442,7 @@ def train(config):
                     device, 
                     run,
                     num_masks=config.model.num_masks_train,
+                    mask_density=config.model.mask_density_train,
                     )
                 train_end_time = time.perf_counter()
                 train_time = train_end_time - train_start_time
@@ -433,7 +450,6 @@ def train(config):
                 lr_scheduler.step(training_loss)
                 run.log({"train/lr": lr_scheduler.get_last_lr()[-1],
                         "train/epoch_time": train_time,
-                        "val/epoch_time": val_time,
                     })
                 
                 # model2 = create_model(config)

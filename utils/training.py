@@ -67,45 +67,67 @@ def train_one_epoch_pscbm(
         config (dict): Configuration dictionary containing model and training settings.
         loss_fn (callable): The loss function used to compute losses.
         device (torch.device): The device to run the computations on.
+        num_ones: deprecated
     """
     model.train()
     metrics.reset()
+    run.log({"epoch": epoch+1})
 
     model_time = 0.0
     mask_time = 0.0
     interventions_time = 0.0
+
+    # Calculate the number of ones in an intervention mask. It is a list of 1 or 2 elements.
+    # If len(num_ones) == 1, it is the constant number of ones for every mask
+    # If len(num_ones) == 2, it contains the lower and upper bounds for the number of ones per mask
+    num_concepts = config.data.num_concepts
+    if type(mask_density) == float:
+        if 0.0 >= mask_density or 1.0 < mask_density:
+            raise ValueError(f"mask_density must be positive and less than 1.")
+        num_ones = [int(num_concepts*mask_density)]
+    elif hasattr(mask_density, '__len__') and len(mask_density) == 2: # Check if mask density is an iterable of length 2, e.g. a list, tuple or an omegaconf.listconfig.ListConfig
+        if 0.0 >= mask_density[0] or 1.0 < mask_density[1] or mask_density[0] > mask_density[1]:
+            raise ValueError(f"mask_density must be between 0 and 1 and the upper bound cannot be smaller than the lower bound.")
+        num_ones = [int(num_concepts * limit) for limit in mask_density]
+    else:
+        raise TypeError(f"mask_density should be a float or a list of 2 floats.")
 
     for k, batch in enumerate(
     tqdm(train_loader, desc=f"Epoch {epoch + 1}", position=0, leave=True)
 ):
         if config.model.cov_type == "global":
             batch_features, target_true, concepts_true, concepts_pred_probs = (item.to(device) for item in batch)
-            timestamp1 = perf_counter()
+            # timestamp1 = perf_counter()
             _, _, _, concepts_cov = model(batch_features, epoch, cov_only=True)
-            timestamp2 = perf_counter()
-            model_time += (timestamp2-timestamp1)
+            # timestamp2 = perf_counter()
+            # model_time += (timestamp2-timestamp1)
         else: # amortized
             batch_features, target_true, concepts_true, concepts_pred_probs, intermediate = (item.to(device) for item in batch)
-            timestamp1 = perf_counter()
+            # timestamp1 = perf_counter()
             _, _, _, concepts_cov = model(batch_features, epoch, cov_only=True, intermediate=intermediate)
-            timestamp2 = perf_counter()
-            model_time += (timestamp2-timestamp1)
+            # timestamp2 = perf_counter()
+            # model_time += (timestamp2-timestamp1)
 
-        batch_size, num_concepts = concepts_true.shape
-        if not num_ones:
-            num_ones = int(num_concepts*mask_density)
+        batch_size = concepts_true.shape[0]
         scores = torch.rand(num_masks, batch_size, num_concepts)
-        topk = torch.topk(scores, num_ones, dim=2)
-        indices = topk.indices
         masks = torch.zeros_like(scores, dtype=torch.int8) #num_masks, batch_size, num_concepts
-        masks.scatter_(2,indices,1) #dim, idx, src
-        assert (
-        (masks.sum(dim=2)==num_ones).all()
-        )
+        if len(num_ones) == 2:
+            num_ones_per_mask = torch.randint(num_ones[0], num_ones[1], (num_masks,), dtype=torch.int64)
+            indices = [torch.topk(scores[i], num_ones_per_mask[i], dim=-1).indices for i in range(num_masks)]
+            for i in range(num_masks):
+                masks[i].scatter_(1, indices[i], 1)
+        else:
+            num_ones_per_mask = num_ones[0]
+            indices = torch.topk(scores, num_ones_per_mask, dim=2).indices
+            masks.scatter_(2,indices,1) #dim, idx, src
+        # assert (
+        # (masks.sum(dim=2)==num_ones_per_mask).all()
+        # )
         masks = masks.to(device)
-        timestamp3 = perf_counter()
-        mask_time += (timestamp3-timestamp2)
+        # timestamp3 = perf_counter()
+        # mask_time += (timestamp3-timestamp2)
         concepts_pred_mu = torch.logit(concepts_pred_probs, eps=1e-6)
+        accumulated_loss = 0
         for concepts_mask in masks:
             concepts_mu_interv, concepts_cov_interv, c_mcmc_probs, c_mcmc_logits = intervention_strategy.compute_intervention(
                                     concepts_pred_mu,
@@ -121,11 +143,11 @@ def train_one_epoch_pscbm(
                 batch_features,
                 concepts_true,
                 )
-            optimizer.zero_grad()
             c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
             target_loss, concepts_loss, prec_loss, total_loss = loss_fn(c_mcmc_probs, concepts_true, y_pred_intervened, target_true, concepts_cov, cov_not_triang=True)
-            total_loss.backward(retain_graph=True)
-            optimizer.step()
+            accumulated_loss += total_loss
+            # total_loss.backward(retain_graph=True)
+            # optimizer.step()
             # Store predictions
             metrics.update(
                 target_loss,
@@ -138,15 +160,26 @@ def train_one_epoch_pscbm(
                 prec_loss=prec_loss,
                 cov_norm=c_norm,
             )     
-        timestamp4 = perf_counter()
-        interventions_time += (timestamp4-timestamp3)
+        accumulated_loss /= masks.shape[0]
+        accumulated_loss.backward()
+        for name, p in model.named_parameters():
+            if p.grad is not None:
+                p_norm = p.grad.data.norm(2)
+                run.log({f"train/{name}_gradient_norm": p_norm})
+                print(f"train/{name}_gradient_norm: {p_norm}")
+
+
+        optimizer.step()
+        optimizer.zero_grad()
+        # timestamp4 = perf_counter()
+        # interventions_time += (timestamp4-timestamp3)
     # Calculate and log metrics
     metrics_dict = metrics.compute(config=config)
     if epoch == 0:
         for (k,v) in metrics_dict.items():
             run.define_metric(f"train/{k}", step_metric="epoch")
     log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
-    log_dict.update({"epoch": epoch + 1})
+    # log_dict.update({"epoch": epoch + 1})
     run.log(log_dict)    
 
     prints = f"Epoch {epoch + 1}, Train     : "
@@ -154,16 +187,16 @@ def train_one_epoch_pscbm(
         prints += f"{key}: {value:.3f} "
     print(prints)
     metrics.reset()
-    print(f"""Time spend on specific activities in the training loop:
-    model evaluation: {model_time:.2f}s
-    masks creation: {mask_time:.2f}s
-    interventions: {interventions_time:.2f}s
-    """)   
-    run.log({
-        "train/model_evaluation_time": model_time,
-        "train/masks_creation_time": mask_time,
-        "train/interventions_time": interventions_time,
-        })           
+    # print(f"""Time spend on specific activities in the training loop:
+    # model evaluation: {model_time:.2f}s
+    # masks creation: {mask_time:.2f}s
+    # interventions: {interventions_time:.2f}s
+    # """)   
+    # run.log({
+    #     "train/model_evaluation_time": model_time,
+    #     "train/masks_creation_time": mask_time,
+    #     "train/interventions_time": interventions_time,
+    #     })           
     return metrics_dict['total_loss']
 
 def train_one_epoch_scbm(
@@ -391,7 +424,7 @@ def create_validation_dataloader_pscbm(
     concept_names_graph=None,
     num_masks=10, # Number of random concept masks per data point
     mask_density=0.15, # Average ratio of concepts which are known in interventions.
-    num_ones=None
+    num_ones=16,
 ):
     """
     Create a validation loader for training the PSCBM for interventions.
@@ -429,9 +462,22 @@ def create_validation_dataloader_pscbm(
             - masks (torch.Tensor): Random masks for interventions.
     """
     # Ensure mask_density is within the valid range [0, 1]
-    assert 0.0 <= mask_density <= 1.0, "Invalid mask_density: must be a float between 0 and 1."
     model.eval()
     metrics.reset()
+    # Determine the number of ones per mask (either constant or a range from which it is uniformly sampled)
+    # Verify that the passed arguments are correct
+    num_concepts = config.data.num_concepts
+    if type(mask_density) == float:
+        if 0.0 >= mask_density or 1.0 < mask_density:
+            raise ValueError(f"mask_density must be positive and less than 1.")
+        num_ones = [int(num_concepts*mask_density)]
+    elif hasattr(mask_density, '__len__') and len(mask_density) == 2: # Check if mask density is an iterable of length 2, e.g. a list, tuple or an omegaconf.listconfig.ListConfig
+        if 0.0 >= mask_density[0] or 1.0 < mask_density[1] or mask_density[0] > mask_density[1]:
+            raise ValueError(f"mask_density must be between 0 and 1 and the upper bound cannot be smaller than the lower bound.")
+        num_ones = [int(num_concepts * limit) for limit in mask_density]
+    else:
+        raise TypeError(f"mask_density should be a float or a list of 2 floats.")
+
     with torch.no_grad():
         intervention_validation_dataset = []
         masks_dataset = []
@@ -439,21 +485,24 @@ def create_validation_dataloader_pscbm(
             batch_features, target_true, concepts_true = batch["features"].to(device), batch["labels"].to(device), batch["concepts"].to(device)
 
             # Masks computation seems valid.
-            # masks = torch.zeros_like(concepts_true.unsqueeze(0).expand(num_masks, -1, -1), dtype=torch.int32)
-            num_concepts = concepts_true.shape[-1]
             batch_size = concepts_true.shape[0]
-            if not num_ones:
-                num_ones = int(num_concepts*mask_density)
+            scores = torch.rand(num_masks, batch_size, num_concepts)
+            masks = torch.zeros_like(scores, dtype=torch.int8) #num_masks, batch_size, num_concepts
             # Generate a batch of masks with shape (num_masks, batch_size, num_concepts) where each mask contains exactly num_ones 1s.
             # Code created with the help of GitHub Copilot.
-            scores = torch.rand(batch_size, num_masks, num_concepts)
-            topk = torch.topk(scores, num_ones, dim=2)
-            indices = topk.indices
-            masks = torch.zeros_like(scores, dtype=torch.int8)
-            masks.scatter_(2,indices,1) #dim, idx, src
-            assert (
-            (masks.sum(dim=2)==num_ones).all()
-            )
+            if len(num_ones) == 2:
+                num_ones_per_mask = torch.randint(num_ones[0], num_ones[1], (num_masks,), dtype=torch.int64)
+                indices = [torch.topk(scores[i], num_ones_per_mask[i], dim=-1).indices for i in range(num_masks)]
+                for i in range(num_masks):
+                    masks[i].scatter_(1, indices[i], 1)
+            else:
+                num_ones_per_mask = num_ones[0]
+                indices = torch.topk(scores, num_ones_per_mask, dim=2).indices
+                masks.scatter_(2,indices,1) #dim, idx, src
+            # TODO Reintroduce the assertion.
+            # assert (
+            # (masks.sum(dim=2)==num_ones).all()
+            # )
             masks_dataset.append(masks)
             if config.model.cov_type == "global":
                 concepts_pred_probs, _, _, _ = model(batch_features, epoch=0, validation=True)
@@ -501,7 +550,7 @@ def create_validation_dataloader_pscbm(
             )
             for i in range(len(intervention_validation_dataset[0]))
         ]
-        masks_dataset = torch.cat(masks_dataset, dim=0)
+        masks_dataset = torch.cat(masks_dataset, dim=1).swapdims_(0,1)
         # masks_dataset = torch.swapdims(masks_dataset, 0, 1)
         intervention_dataset = TensorDataset(
             *intervention_validation_dataset,

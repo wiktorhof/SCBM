@@ -346,6 +346,13 @@ def train(config):
             run.define_metric("train/masks_creation_time", step_metric="epoch")
             run.define_metric("train/interventions_time", step_metric="epoch")
             model.CBM.apply(freeze_module)
+            learnable_parameters = ""
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    learnable_parameters += f"{name}\n"
+                    run.define_metric(f"train/{name}_gradient_norm", step_metric="epoch")
+
+            print(f"Learnable parameters:\n{learnable_parameters}")
             
             #TODO paramters for optimizer and scheduler should be optimized :-) Don't I exaggerate?
             optimizer = create_optimizer(config.model, model)
@@ -354,7 +361,7 @@ def train(config):
                     optimizer,
                     mode='min',
                     factor=1 / config.model.lr_divisor,
-                    patience=20
+                    patience=10
                 )
             intervention_strategy = define_strategy(
                 "simple_perc", train_loader, model, device, config
@@ -372,7 +379,8 @@ def train(config):
                 loss_fn,
                 device,
                 run,
-                num_masks=config.model.num_masks_val
+                num_masks=config.model.num_masks_val,
+                mask_density=config.model.mask_density_val,
             )
             end_time = time.perf_counter()
             best_validation_loss = torch.inf
@@ -392,6 +400,7 @@ def train(config):
                         mode=config.logging.mode,
                         tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
                     ) as interventions_run:
+                        interventions_run.config['epoch'] = epoch # Log at which epoch the curves are calculated. This will allow better comparison
                         if config.logging.mode in ["online", "disabled"]:
                             interventions_run.name = run.name.split("-")[0] + "-" + config.experiment_name + "_epoch_" + str(epoch)
                         else:
@@ -412,6 +421,9 @@ def train(config):
                     if validation_loss < best_validation_loss:
                         best_validation_loss = validation_loss
                         torch.save(model.sigma_concepts, join(experiment_path, "best_covariance.pth"))
+                    run.log({
+                        "validation_cov_training/epoch_time": val_time,
+                        })
 
                 train_start_time = time.perf_counter()
                 training_loss = train_one_epoch_pscbm(
@@ -426,14 +438,14 @@ def train(config):
                     device, 
                     run,
                     num_masks=config.model.num_masks_train,
+                    mask_density=config.model.mask_density_train,
                     )
                 train_end_time = time.perf_counter()
                 train_time = train_end_time - train_start_time
-                print(f"Training the model for 1 epoch took {train_time:.2f} s.")
+                # print(f"Training the model for 1 epoch took {train_time:.2f} s.")
                 lr_scheduler.step(training_loss)
                 run.log({"train/lr": lr_scheduler.get_last_lr()[-1],
                         "train/epoch_time": train_time,
-                        "val/epoch_time": val_time,
                     })
                 
                 # model2 = create_model(config)

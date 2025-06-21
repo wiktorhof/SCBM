@@ -15,7 +15,7 @@ encoder_arch='resnet18'
 model='SCBM'
 i=42
 #concept_learning='hard'
-cov_type='empirical'
+cov_type='global'
 save_model='True'
 save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/

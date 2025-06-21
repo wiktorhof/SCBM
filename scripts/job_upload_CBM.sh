@@ -21,20 +21,21 @@ save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 
-#for concept_learning in 'soft'
-#do
-#for training_mode in 'joint'
-#do
-#tag=${model}_${concept_learning}_${data}
-#sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir} model.training_mode=${training_mode}
-#echo Job submitted
-#done;
-#done;
-
-for model in 'AR' 'CEM'
+for concept_learning in 'hard'
 do
-tag=${model}
-sbatch --output=${output_file} --mem=$mem --job-name=${tag} train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i logging.project=PSCBM logging.mode=offline model.tag=$tag model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir}
-#echo Job submitted
+for i in 13 27
+do
+tag=${model}_${concept_learning}_${data}
+sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" \
+seed=$i model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch save_model=${save_model} \
+experiment_dir=${save_model_dir}
 done;
-echo All jobs submitted
+done;
+
+# for model in 'AR' 'CEM'
+# do
+# tag=${model}
+# sbatch --output=${output_file} --mem=$mem --job-name=${tag} train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i logging.project=PSCBM logging.mode=offline model.tag=$tag model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir}
+# #echo Job submitted
+# done;
+# echo All jobs submitted

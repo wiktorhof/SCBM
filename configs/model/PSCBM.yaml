@@ -9,11 +9,11 @@ load_CBM: True
 load_weights: True
 model: 'pscbm' # Model's name
 tag: 'pscbm' # Model's tag for wandb logging
-concept_learning: 'soft' # Characteristics of concept bottleneck, either hard {0,1}, or soft logits ['hard', 'soft', 'cem']
+concept_learning: 'hard' # Characteristics of concept bottleneck, either hard {0,1}, or soft logits ['hard', 'soft', 'cem']
 # I will then also want to use CEM.
-i_epochs: 1000 # The number of epochs for which the covariance matrix is fine-tuned. These are many for now, I will observe, how many are actually needed.
+i_epochs: 200 # The number of epochs for which the covariance matrix is fine-tuned. These are many for now, I will observe, how many are actually needed.
 validate_per_epoch: 5 # More frequent to observe the behaviour better
-curves_every: 5 # How frequently to calculate intervention curves. They are calculated not only after the full training, in order to monitor how the model's intervention performance develops over time.
+curves_every: 20 # How frequently to calculate intervention curves. They are calculated not only after the full training, in order to monitor how the model's intervention performance develops over time.
 
 learning_rate: 0.0001 # Learning rate in the optimization
 optimizer: 'adam' # Optimizer: ['sgd','adam']
@@ -23,16 +23,18 @@ train_batch_size: 128 # Batch size for the training set
 val_batch_size: 128 # Batch size for the validation and test sets
 
 # Covariance
-cov_type: 'global' # Covariance specification. Empirical_true computes the empirical covariance over the true labels of the training set and fixes it.
+cov_type: 'amortized' # Covariance specification. Empirical_true computes the empirical covariance over the true labels of the training set and fixes it.
 # Empirical_predicted computes the covariance over concepts predicted by the model's encoder ['empirical_true', 'empirical_predicted', 'global']
 reg_precision: 'l1' # Regularization strategy of covariance ['l1', None] if it is learned
 reg_weight: 1 # Regularization strength if reg_precision is not None
-data_ratio: 1 # Low ratio for debugging purposes
+data_ratio: 1 
 covariance_scaling: 1.0001 # Enough
 # Covariance training
-num_masks_train: 10
-num_masks_val: 10
-mask_density: [0.01,0.25]
+num_masks_train: 20
+num_masks_val: 40
+mask_density_train: [0.01,0.25]
+mask_density_val: [0.01,0.25] # I variate mask density used for training but for validation it should be constant for better comparison. Otherwise models trained with different
+# densities inherently exhibit offsets on validation, too.
 # --------------------------
 #         Policy
 # --------------------------

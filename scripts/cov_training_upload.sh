@@ -15,27 +15,69 @@ mem='20G'
 encoder_arch='resnet18'
 model='PSCBM'
 
-cov='global'
+data_ratio=1
+covariance_scaling=1.0001
+concept_learning='hard'
 
 save_model='True'
 save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 
-data_ratio=1
-covariance_scaling=1.0001
-concept_learning='hard'
-for num_masks_train in 1 2 5 20
+
+# for i in 1
+# do
+# tag=${model}_${concept_learning}_${cov}
+# sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
+# +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
+# model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
+# save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
+# model.cov_type=${cov} \
+# model.training_mode='joint'
+# done
+
+
+# cov='amortized'
+
+# for i in 1
+# do
+# tag=${model}_${concept_learning}_${cov}
+# sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
+# +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
+# model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
+# save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
+# model.cov_type=${cov} \
+# model.inter_policy=\'prob_unc,random\'
+# done
+
+i=5
+cov='amortized'
+num_masks_train=20
+lr=0.0001
+
+for train_batch_size in 32 128
 do
-for i in 42
-do
-tag=${model}_${concept_learning}_${cov}
-sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
-+data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
-model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
-save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
-model.cov_type=${cov} model.data_ratio=${data_ratio} model.covariance_scaling=${covariance_scaling} \
-model.inter_policy=\'prob_unc,random\' model.inter_strategy=\'hard,simple_perc,emp_perc\' \
-model.training_mode='joint' model.num_masks_train=${num_masks_train}
-done
+    for reg_weight in 0.1 0.01
+    do
+        for mask_density in 0.2
+        do
+            tag=${model}_${concept_learning}_${cov}
+            sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
+            +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
+            model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
+            save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
+            model.cov_type=${cov} model.mask_density_train=${mask_density} model.num_masks_train=${num_masks_train} \
+            model.inter_policy=\'prob_unc,random\' model.learning_rate=${lr} model.train_batch_size=${train_batch_size}
+        done
+
+        # Use default mask density, i.e. random up to 25%
+        tag=${model}_${concept_learning}_${cov}
+        sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
+        +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
+        model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
+        save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
+        model.cov_type=${cov} model.num_masks_train=${num_masks_train} \
+        model.inter_policy=\'prob_unc,random\' model.learning_rate=${lr}
+
+    done
 done
