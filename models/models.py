@@ -115,6 +115,7 @@ class PSCBM(nn.Module):
         self.training_mode = config_model.training_mode
         self.concept_learning = config_model.concept_learning
         self.num_monte_carlo = config_model.num_monte_carlo
+        self.num_samples = config_model.get("num_samples", self.num_monte_carlo)
         self.straight_through = config_model.straight_through
         self.curr_temp = 1.0
         if self.training_mode == "joint":
@@ -166,9 +167,6 @@ class PSCBM(nn.Module):
             self.CBM.load_state_dict(torch.load(CBM_dir, weights_only=True, map_location=torch.device('cpu')))
             print(message)
 
-        # Not sure whether these are going to work without bugs. But I will risk.
-        # When I artificially modified self.CBM.head, self.head got modified exactly
-        # The same way. I conclude that this should work then.
         self.head = self.CBM.head
         self.encoder = self.CBM.encoder
         self.concept_predictor = self.CBM.concept_predictor
@@ -177,11 +175,12 @@ class PSCBM(nn.Module):
         self.n_features = self.CBM.n_features
         self.pred_dim = self.CBM.pred_dim
 
-        # Compute covariance
+        # Compute covariance if it is constant
         if self.cov_type in ("identity", "empirical_true", "empirical_predicted", "empirical"):
             self.sigma_concepts = torch.zeros(
                 int(self.num_concepts * (self.num_concepts + 1) / 2)
             )
+        # Initialize covariance if it is learnable
         elif self.cov_type == "global":
             self.sigma_concepts = nn.Parameter(
                 torch.zeros(int(self.num_concepts *(self.num_concepts + 1) / 2))
@@ -201,7 +200,7 @@ class PSCBM(nn.Module):
             raise NotImplementedError("Other covariance types are not implemented.")
 
 
-    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False, return_intermediate=False):
+    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False, return_intermediate=False, use_covariance=False):
         """
         args:
         intermediate: if we are only interested in calculating the covariance, we can pass the encoder's features s.t. they don't have to be reevaluated.
@@ -210,16 +209,25 @@ class PSCBM(nn.Module):
         target_pred_logits
         concepts
         concepts_cov: in full form, not triangular - This is my design choice
-        """
-        if cov_only:
-            concepts_pred_probs, target_pred_logits, concepts = None, None, None
-        else:
-            # Get intermediate representation for calculating amortized covariance
-            if self.cov_type == "amortized" or return_intermediate:
-                concepts_pred_probs, target_pred_logits, concepts, intermediate = self.CBM(x, epoch, c_true=c_true, validation=validation, return_intermediate=True)
-            # If covariance isn't amortized, the intermediate representation is not needed
+        use_covariance: if yes concepts logits are sampled from a normal distribution given by covariance and mu. It has no effect if cov_only==True
+
+        Structure of this function:
+        
+        1. Create the covariance matrix. In "amortized" case evaluating the encoder may be necessary
+        2. if cov_only, set other return variables to None
+        3. in not cov_only, calculate other return variables:
+            if use_covariance:
+                a) Calculate intermediate = encoder(x) if intermediate is None
+                b) Sample concepts
+                c) Calculate target from concepts
             else:
-                concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation)
+                Get concept & target prediction directly from the CBM
+        4. Return the appropriate tuple (including intermediate or not)
+        
+        This flow is a bit complicated but the advantage is that it allows various use cases like returning only the covariance matrix, using the covariance matrix to sample
+        concepts or passing the intermediate encoder representation in order to speed up computations.
+        """
+        # Step 1
         if self.cov_type.startswith("empirical") or self.cov_type == "identity":
             concepts_cov = self.covariance.repeat(x.shape[0],1)
         elif self.cov_type == "global":
@@ -246,13 +254,74 @@ class PSCBM(nn.Module):
             )
             concepts_cov = c_triang_cov @ c_triang_cov.transpose(dim0=-2, dim1=-1)
 
-        # concepts_cov = numerical_stability_check(concepts_cov)
-        # concepts_pred_logits=torch.logit(concepts_pred_probs, eps=1e-6)
-        # cov_only is useful for validation of covariance training where mu's are always the same and only the covariance changes.
-        # return intermediate is useful if we are creating a training / validation dataset for amortized covariance
+        # Step 2
+        if cov_only:
+            concepts_pred_probs, target_pred_logits, concepts = None, None, None
+            return_intermediate = False # Just in case someone passed incorrect arguments
+        # Step 3
+        else:
+            if use_covariance:
+                intermediate = self.encoder(x) if intermediate is None else intermediate
+                c_mu = self.concept_predictor(intermediate)
+                c_dist = MultivariateNormal(c_mu, covariance=concepts_cov)
+                c_mcmc_logit = c_dist.rsample([self.num_samples]).movedim(0, -1) # [batch_size, num_concepts, num_samples]
+                c_mcmc_prob = self.act_c(c_mcmc_logit)
+                # At this point original SCBM implementation kicks in
+                # START COPY-PASTE
+                # For all MCMC samples simultaneously sample from Bernoulli
+                if validation or self.training_mode == "sequential":
+                    # No backpropagation necessary
+                    c_mcmc = torch.bernoulli(c_mcmc_prob)
+                elif self.training_mode == "independent":
+                    c_mcmc = c_true.unsqueeze(-1).repeat(1, 1, self.num_monte_carlo).float()
+                else:
+                    # Backpropagation necessary
+                    curr_temp = self.compute_temperature(epoch, device=c_mcmc_prob.device)
+                    dist = RelaxedBernoulli(temperature=curr_temp, probs=c_mcmc_prob)
+
+                    # Bernoulli relaxation
+                    mcmc_relaxed = dist.rsample()
+                    if self.straight_through:
+                        # Straight-Through Gumbel Softmax
+                        mcmc_hard = (mcmc_relaxed > 0.5) * 1
+                        c_mcmc = mcmc_hard - mcmc_relaxed.detach() + mcmc_relaxed
+                    else:
+                        c_mcmc = mcmc_relaxed
+
+                # MCMC loop for predicting label
+                y_pred_probs_i = 0
+                # Couldn't this loop be avoided?
+                for i in range(self.num_monte_carlo):
+                    if self.concept_learning == "hard":
+                        c_i = c_mcmc[:, :, i]
+                    elif self.concept_learning == "soft":
+                        c_i = c_mcmc_logit[:, :, i]
+                    else:
+                        raise NotImplementedError
+                    y_pred_logits_i = self.head(c_i)
+                    if self.pred_dim == 1:
+                        y_pred_probs_i += torch.sigmoid(y_pred_logits_i)
+                    else:
+                        y_pred_probs_i += torch.softmax(y_pred_logits_i, dim=1)
+                y_pred_probs = y_pred_probs_i / self.num_monte_carlo
+                if self.pred_dim == 1:
+                    y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
+                else:
+                    y_pred_logits = torch.log(y_pred_probs + 1e-6)
+                # END COPY-PASTE
+                concepts_pred_probs = c_mcmc_prob.mean(-1)
+                target_pred_logits = y_pred_logits
+                concepts = c_mcmc
+            
+            # Don't use covariance - use vanilla CBM
+            else:
+                if return_intermediate:
+                    concepts_pred_probs, target_pred_logits, concepts, intermediate = self.CBM(x, epoch, c_true=c_true, validation=validation, intermediate=intermediate, return_intermediate=True)
+                else:
+                    concepts_pred_probs, target_pred_logits, concepts = self.CBM(x, epoch, c_true=c_true, validation=validation, intermediate=intermediate)
+                
+        # Step 4
         if return_intermediate:
-            if intermediate is None:
-                intermediate = self.encoder(x)
             return concepts_pred_probs, target_pred_logits, concepts, concepts_cov, intermediate
         else:
             return concepts_pred_probs, target_pred_logits, concepts, concepts_cov
@@ -278,59 +347,6 @@ class PSCBM(nn.Module):
             concepts_intervened_probs = (c_true * c_mask) + concepts_intervened_probs * (1 - c_mask)
 
         return self.CBM.intervene(concepts_intervened_probs, c_mask, input_features, None)
-
-        # if self.concept_learning == "soft":
-        #     # Soft CBM
-        #     y_pred_logits = self.CBM.head(concepts_mu_intervened)
-        #
-        # elif self.concept_learning == "hard":
-        #     y_pred_probs = 0
-        #     concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
-        #     c_prob_mcmc = concepts_probs_intervened.unsqueeze(-1).expand(
-        #         -1, -1, self.num_monte_carlo
-        #     )
-        #     c = torch.bernoulli(c_prob_mcmc)
-        #
-        #     # Fix intervened-on concepts to ground truth
-        #     c[concepts_mask == 1] = (
-        #         concepts_probs_intervened[concepts_mask == 1]
-        #         .unsqueeze(-1)
-        #         .expand(-1, self.num_monte_carlo)
-        #     )
-        #
-        #     for i in range(self.num_monte_carlo):
-        #         c_i = c[:, :, i]
-        #         y_pred_logits_i = self.CBM.head(c_i)
-        #         if self.pred_dim == 1:
-        #             y_pred_probs += torch.sigmoid(
-        #                 y_pred_logits_i
-        #             )
-        #         else:
-        #             y_pred_probs += torch.softmax(
-        #                 y_pred_logits_i, dim=1
-        #             )
-        #
-        #     y_pred_probs /= self.num_monte_carlo
-        #     if self.pred_dim == 1:
-        #         y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
-        #     else:
-        #         y_pred_logits = torch.log(y_pred_probs + 1e-6)
-        #
-        # # Copy-pasted from the respective CBM function
-        # elif self.concept_learning == "embedding":
-        #     intermediate = self.CBM.encoder(input_features)
-        #     c_p = [p(intermediate) for p in self.CBM.positive_embeddings]
-        #     c_n = [n(intermediate) for n in self.CBM.negative_embeddings]
-        #     concepts_probs_intervened = self.CBM.act_c(concepts_mu_intervened)
-        #     z_prob = [
-        #         concepts_probs_intervened[:, i].unsqueeze(1) * c_p[i] +
-        #         (1 - concepts_probs_intervened[:, i].unsqueeze(1)) * c_n[i]
-        #         for i in range(self.num_concepts)
-        #     ]
-        #     z_prob = torch.cat([z_prob[i] for i in range(self.num_concepts)], dim=1)
-        #     y_pred_logits = self.head(z_prob)
-        #
-        # return y_pred_logits
 
     def freeze_c(self):
         self.CBM.head.apply(freeze_module)
@@ -771,6 +787,7 @@ class CBM(nn.Module):
         c_true=None,
         validation=False,
         concepts_train_ar=False,
+        intermediate=None,
         return_intermediate=False,
     ):
         """
@@ -796,7 +813,8 @@ class CBM(nn.Module):
         """
 
         # Get intermediate representations
-        intermediate = self.encoder(x)
+        if intermediate is None:
+            intermediate = self.encoder(x)
 
         # Get concept predictions
         if self.concept_learning in ("hard", "soft"):
