@@ -94,14 +94,50 @@ def load_weights(model: nn.Module, config: DictConfig):
 
 class PSCBM(nn.Module):
     """
-    Post-Hoc Stochastic Concept Bottleneck Model (PSCBM)
-
-    This class implements a Post-Hoc Stochastic Concept Bottleneck Model (PSCBM) which adapts SCBM to work Post-Hoc:
-    The covariance matrix is computed for a trained Concept Bottleneck Model (CBM).
-
-    Supported versions of covariance matrices:
-    - empirical over ground truth concept values
-    - empirical over model predictions
+    This class implements a Post-Hoc Stochastic Concept Bottleneck Model (PSCBM), which adapts the Stochastic Concept Bottleneck Model (SCBM) to work in a post-hoc setting. The covariance matrix for the concepts is computed for a trained Concept Bottleneck Model (CBM), allowing for stochastic modeling of concept predictions, especially during interventions.
+    Key Features:
+    - Supports different types of covariance matrices for the concepts:
+        - "identity": Identity covariance matrix.
+        - "empirical_true": Empirical covariance computed over ground truth concept values.
+        - "empirical_predicted": Empirical covariance computed over model-predicted concept values.
+        - "empirical": equivalent to "empirical_true"
+        - "global": Learnable global covariance matrix. I.e. the same indepentently of the sample
+        - "amortized": Covariance matrix predicted by a neural network conditioned on input features. That is, it can adapt to a specific sample.
+    - Loads and wraps a trained CBM loading pretrained weights. Training the CBM from scratch is not implemented
+    - Provides a versatile forward method that can:
+        - Return only the covariance matrix if requested.
+        - Calculate concept probabilities and target logits either by using the underlying CBM or by sampling from a normal distribution defined by the concept prediction and the covariance matrix.
+        - Optionally it returns or takes as argument intermediate encoder representations. This can significantly speed up the evaluation in case we need to reevaluate it multiple times for the same inputs and gradients for the encoder are not needed. Use cases for this: validation/test pass or training only the covariance predictor.
+    - Supports concepts interventions.
+    - Includes methods to freeze and unfreeze parts of the model for different training regimes.
+        config: Configuration object containing model, data, and training parameters.
+    Attributes:
+        num_concepts (int): Number of concepts.
+        num_classes (int): Number of target classes.
+        encoder_arch (str): Architecture of the encoder.
+        head_arch (str): Architecture of the head.
+        training_mode (str): Training mode (e.g., "joint", "sequential").
+        concept_learning (str): Concept learning mode (e.g., "hard", "soft", "embedding").
+        num_monte_carlo (int): Number of Monte Carlo samples for stochastic inference.
+        num_samples (int): Number of samples for concept sampling.
+        straight_through (bool): Whether to use straight-through estimator for relaxed Bernoulli sampling.
+        curr_temp (float): Current temperature for relaxed Bernoulli.
+        num_epochs (int): Number of training epochs.
+        cov_type (str): Type of covariance matrix used.
+        CBM (nn.Module): Wrapped Concept Bottleneck Model.
+        head (nn.Module): Head module for final prediction.
+        encoder (nn.Module): Encoder module for feature extraction.
+        concept_predictor (nn.Module): Module for predicting concepts.
+        act_c (callable): Activation function for concept outputs.
+        n_features (int): Number of features output by the encoder.
+        pred_dim (int): Output dimension of the prediction head.
+        sigma_concepts (Tensor or nn.Module): Covariance parameters (fixed, learnable, or amortized).
+    Methods:
+        forward(x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False, return_intermediate=False, use_covariance=False):
+            The forward method can return predictions, sampled concepts, and/or the covariance matrix.
+            The intervene method performs intervention on the concepts and returns the model's prediction after intervention.
+            The freeze_c method freezes the head module for concept learning.
+            The freeze_t method freezes the encoder and concept predictor modules for target learning, and unfreezes the head.
     """
 
     def __init__(self, config):
@@ -117,7 +153,7 @@ class PSCBM(nn.Module):
         self.num_monte_carlo = config_model.num_monte_carlo
         self.num_samples = config_model.get("num_samples", self.num_monte_carlo)
         self.straight_through = config_model.straight_through
-        self.curr_temp = 1.0
+        self.curr_temp = 0.5 # Final temperature of SCBM
         if self.training_mode == "joint":
             self.num_epochs = config_model.j_epochs
         else:
@@ -276,7 +312,7 @@ class PSCBM(nn.Module):
                     c_mcmc = c_true.unsqueeze(-1).repeat(1, 1, self.num_monte_carlo).float()
                 else:
                     # Backpropagation necessary
-                    curr_temp = self.compute_temperature(epoch, device=c_mcmc_prob.device)
+                    curr_temp = self.curr_temp.to(c_mcmc_prob.device)
                     dist = RelaxedBernoulli(temperature=curr_temp, probs=c_mcmc_prob)
 
                     # Bernoulli relaxation
@@ -290,25 +326,40 @@ class PSCBM(nn.Module):
 
                 # MCMC loop for predicting label
                 y_pred_probs_i = 0
-                # Couldn't this loop be avoided?
-                for i in range(self.num_monte_carlo):
-                    if self.concept_learning == "hard":
-                        c_i = c_mcmc[:, :, i]
-                    elif self.concept_learning == "soft":
-                        c_i = c_mcmc_logit[:, :, i]
-                    else:
-                        raise NotImplementedError
-                    y_pred_logits_i = self.head(c_i)
-                    if self.pred_dim == 1:
-                        y_pred_probs_i += torch.sigmoid(y_pred_logits_i)
-                    else:
-                        y_pred_probs_i += torch.softmax(y_pred_logits_i, dim=1)
-                y_pred_probs = y_pred_probs_i / self.num_monte_carlo
-                if self.pred_dim == 1:
-                    y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
-                else:
-                    y_pred_logits = torch.log(y_pred_probs + 1e-6)
+                # # Couldn't this loop be avoided?
+                # for i in range(self.num_monte_carlo):
+                #     if self.concept_learning == "hard":
+                #         c_i = c_mcmc[:, :, i]
+                #     elif self.concept_learning == "soft":
+                #         c_i = c_mcmc_logit[:, :, i]
+                #     else:
+                #         # I could implement CEM here if time is
+                #         raise NotImplementedError
+                #     y_pred_logits_i = self.head(c_i)
+                #     if self.pred_dim == 1:
+                #         y_pred_probs_i += torch.sigmoid(y_pred_logits_i)
+                #     else:
+                #         y_pred_probs_i += torch.softmax(y_pred_logits_i, dim=1)
+                # y_pred_probs = y_pred_probs_i / self.num_monte_carlo
+                # if self.pred_dim == 1:
+                #     y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
+                # else:
+                #     y_pred_logits = torch.log(y_pred_probs + 1e-6)
                 # END COPY-PASTE
+
+                # Here come my inventions for the for-loop above:
+                # I think this should work
+                if self.concept_learning == "hard":
+                    c = c_mcmc
+                elif self.concept_learning == "soft":
+                    c = c_mcmc_logit
+                else:
+                    # I could implement CEM here if time is
+                    raise NotImplementedError
+                # Move concepts dimension to the front. Pass everything at once through the head
+                c = c.movedim(-1, 0)
+                y_pred_logits = self.head(c).mean(0)  # [num_monte_carlo, batch_size, num_classes]
+
                 concepts_pred_probs = c_mcmc_prob.mean(-1)
                 target_pred_logits = y_pred_logits
                 concepts = c_mcmc
