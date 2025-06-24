@@ -236,6 +236,36 @@ class PSCBM(nn.Module):
             raise NotImplementedError("Other covariance types are not implemented.")
 
 
+    def _compute_covariance(self, x, intermediate):
+        
+        if self.cov_type.startswith("empirical") or self.cov_type == "identity":
+            concepts_cov = self.covariance.repeat(x.shape[0],1)
+        elif self.cov_type == "global":
+            c_sigma_triang = self.sigma_concepts.repeat(x.shape[0], 1)
+        elif self.cov_type == "amortized":
+            # This condition is only triggered if cov_only=True and intermediate=None
+            if intermediate is None:
+                intermediate = self.encoder(x)
+            c_sigma_triang = self.sigma_concepts(intermediate)
+        if not (self.cov_type.startswith("empirical") or self.cov_type == "identity"):
+            # Create a lower-triangular matrix
+            c_triang_cov = torch.zeros(
+                (c_sigma_triang.shape[0], self.num_concepts, self.num_concepts),
+                device=c_sigma_triang.device,
+            )
+            rows, cols = torch.tril_indices(
+                row=self.num_concepts, col=self.num_concepts, offset=0
+            )
+            diag_idx = rows == cols
+            c_triang_cov[:, rows, cols] = c_sigma_triang
+            # Make the diagonal positive
+            c_triang_cov[:, range(self.num_concepts), range(self.num_concepts)] = (
+                F.softplus(c_sigma_triang[:, diag_idx]) + 1e-6
+            )
+            concepts_cov = c_triang_cov @ c_triang_cov.transpose(dim0=-2, dim1=-1)
+
+            return concepts_cov
+
     def forward(self, x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False, return_intermediate=False, use_covariance=False):
         """
         args:
@@ -264,32 +294,7 @@ class PSCBM(nn.Module):
         concepts or passing the intermediate encoder representation in order to speed up computations.
         """
         # Step 1
-        if self.cov_type.startswith("empirical") or self.cov_type == "identity":
-            concepts_cov = self.covariance.repeat(x.shape[0],1)
-        elif self.cov_type == "global":
-            c_sigma_triang = self.sigma_concepts.repeat(x.shape[0], 1)
-        elif self.cov_type == "amortized":
-            # This condition is only triggered if cov_only=True and intermediate=None
-            if intermediate is None:
-                intermediate = self.encoder(x)
-            c_sigma_triang = self.sigma_concepts(intermediate)
-        if not (self.cov_type.startswith("empirical") or self.cov_type == "identity"):
-            # Create a lower-triangular matrix
-            c_triang_cov = torch.zeros(
-                (c_sigma_triang.shape[0], self.num_concepts, self.num_concepts),
-                device=c_sigma_triang.device,
-            )
-            rows, cols = torch.tril_indices(
-                row=self.num_concepts, col=self.num_concepts, offset=0
-            )
-            diag_idx = rows == cols
-            c_triang_cov[:, rows, cols] = c_sigma_triang
-            # Make the diagonal positive
-            c_triang_cov[:, range(self.num_concepts), range(self.num_concepts)] = (
-                F.softplus(c_sigma_triang[:, diag_idx]) + 1e-6
-            )
-            concepts_cov = c_triang_cov @ c_triang_cov.transpose(dim0=-2, dim1=-1)
-
+        concepts_cov = self._compute_covariance(x, intermediate)
         # Step 2
         if cov_only:
             concepts_pred_probs, target_pred_logits, concepts = None, None, None
