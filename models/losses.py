@@ -139,6 +139,7 @@ class SCBLoss(nn.Module):
         self.alpha = alpha if config.training_mode == "joint" else 1.0
         self.reg_precision = config.reg_precision
         self.reg_weight = config.reg_weight
+        self.reg_clamp = torch.tensor(config.get("reg_clamp", torch.inf))
 
     def forward(
         self,
@@ -212,6 +213,7 @@ class SCBLoss(nn.Module):
         else:
             prec_loss = torch.zeros_like(concepts_loss)
 
+        prec_loss = torch.min(prec_loss, self.reg_clamp)
         total_loss = target_loss + concepts_loss + prec_loss
 
         return target_loss, concepts_loss, prec_loss, total_loss
