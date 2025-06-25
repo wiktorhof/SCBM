@@ -17,6 +17,7 @@ import yaml
 from models.networks import FCNNEncoder
 from utils.training import freeze_module, unfreeze_module
 from utils.data import get_empirical_covariance
+from utils.utils import numerical_stability_check
 
 def create_model(config: DictConfig):
     """
@@ -305,6 +306,7 @@ class PSCBM(nn.Module):
             if use_covariance:
                 intermediate = self.encoder(x) if intermediate is None else intermediate
                 c_mu = self.concept_predictor(intermediate)
+                # concepts_cov = numerical_stability_check(concepts_cov, concepts_cov.device)
                 c_dist = MultivariateNormal(c_mu, covariance_matrix=concepts_cov)
                 c_mcmc_logit = c_dist.rsample([self.num_samples]).movedim(0, -1) # [batch_size, num_concepts, num_samples]
                 c_mcmc_prob = self.act_c(c_mcmc_logit)
@@ -312,10 +314,10 @@ class PSCBM(nn.Module):
                 # START COPY-PASTE
                 # For all MCMC samples simultaneously sample from Bernoulli
                 if validation or self.training_mode == "sequential":
-                    # No backpropagation necessary
+                    # No backpropagation necessary - we only train the head after concept predictor has been trained
                     c_mcmc = torch.bernoulli(c_mcmc_prob)
                 elif self.training_mode == "independent":
-                    c_mcmc = c_true.unsqueeze(-1).repeat(1, 1, self.num_monte_carlo).float()
+                    c_mcmc = c_true.unsqueeze(-1).repeat(1, 1, self.num_monte_carlo).float() # True labels as input for head
                 else:
                     # Backpropagation necessary
                     curr_temp = self.curr_temp.to(c_mcmc_prob.device)
@@ -353,7 +355,7 @@ class PSCBM(nn.Module):
 
                 concepts_pred_probs = c_mcmc_prob.mean(-1)
                 target_pred_logits = y_pred_logits
-                concepts = c # probs for hard, logits for soft method. For CEM this would be the embeddings, I suppose.
+                concepts = mcmc_relaxed # Concept probabilities sampled from the Relaxed Bernoulli
             
             # Don't use covariance - use vanilla CBM
             else:
@@ -389,6 +391,14 @@ class PSCBM(nn.Module):
             concepts_intervened_probs = (c_true * c_mask) + concepts_intervened_probs * (1 - c_mask)
 
         return self.CBM.intervene(concepts_intervened_probs, c_mask, input_features, None)
+
+    def compute_temperature(self, epoch, device):
+        final_temp = torch.tensor([0.5], device=device)
+        init_temp = torch.tensor([1.0], device=device)
+        rate = (math.log(final_temp) - math.log(init_temp)) / float(self.num_epochs)
+        curr_temp = max(init_temp * math.exp(rate * epoch), final_temp)
+        self.curr_temp = curr_temp
+        return curr_temp
 
     def freeze_c(self):
         self.CBM.head.apply(freeze_module)
@@ -610,24 +620,24 @@ class SCBM(nn.Module):
 
         # MCMC loop for predicting label has been replaced by a vectorized version. Same result but much faster.
         if self.concept_learning == "hard":
-                c = c_mcmc
-            elif self.concept_learning == "soft":
-                c = c_mcmc_logit
-            else:
-                # I could implement CEM here if time is
-                raise NotImplementedError
-            # Move concepts dimension to the front. Pass everything at once through the head
-            c = c.movedim(-1, 0)
-            y_pred_logits = self.head(c)  # [num_monte_carlo, batch_size, num_classes]
-            if self.pred_dim == 1:
-                y_pred_probs = torch.sigmoid(y_pred_logits).mean(0)
-            else:
-                y_pred_probs = torch.softmax(y_pred_logits, dim=-1).mean(0)
-            # Again I ask: Why do we calculate logits and then probabilities from them is obvious. But why do we move back to the logit space then?
-            if self.pred_dim == 1:
-                y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
-            else:
-                y_pred_logits = torch.log(y_pred_probs + 1e-6)
+            c = c_mcmc
+        elif self.concept_learning == "soft":
+            c = c_mcmc_logit
+        else:
+            # I could implement CEM here if time is
+            raise NotImplementedError
+        # Move concepts dimension to the front. Pass everything at once through the head
+        c = c.movedim(-1, 0)
+        y_pred_logits = self.head(c)  # [num_monte_carlo, batch_size, num_classes]
+        if self.pred_dim == 1:
+            y_pred_probs = torch.sigmoid(y_pred_logits).mean(0)
+        else:
+            y_pred_probs = torch.softmax(y_pred_logits, dim=-1).mean(0)
+        # Again I ask: Why do we calculate logits and then probabilities from them is obvious. But why do we move back to the logit space then?
+        if self.pred_dim == 1:
+            y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
+        else:
+            y_pred_logits = torch.log(y_pred_probs + 1e-6)
 
         # Return concept mu for interventions
         if return_full:
