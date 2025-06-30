@@ -139,7 +139,7 @@ class SCBLoss(nn.Module):
         self.alpha = alpha if config.training_mode == "joint" else 1.0
         self.reg_precision = config.reg_precision
         self.reg_weight = config.reg_weight
-        self.reg_clamp = torch.tensor(config.get("reg_clamp", torch.inf))
+        self.reg_clamp = torch.tensor(config.get("reg_clamp", None))
 
     def forward(
         self,
@@ -212,8 +212,9 @@ class SCBLoss(nn.Module):
             prec_loss = self.reg_weight * prec_loss.mean(-1)
         else:
             prec_loss = torch.zeros_like(concepts_loss)
-
-        prec_loss = torch.min(prec_loss, self.reg_clamp)
+        # Clamp precision loss as it has the tendency to explode. This is done post scaling with regularization strength.
+        if self.reg_clamp is not None:
+            prec_loss = torch.clamp(prec_loss, max=self.reg_clamp.to(prec_loss.device))
         total_loss = target_loss + concepts_loss + prec_loss
 
         return target_loss, concepts_loss, prec_loss, total_loss

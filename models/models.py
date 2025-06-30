@@ -355,7 +355,7 @@ class PSCBM(nn.Module):
 
                 concepts_pred_probs = c_mcmc_prob.mean(-1)
                 target_pred_logits = y_pred_logits
-                concepts = mcmc_relaxed # Concept probabilities sampled from the Relaxed Bernoulli
+                concepts = c_mcmc_prob # Concept probabilities computed out of logits sampled from c_dist
             
             # Don't use covariance - use vanilla CBM
             else:

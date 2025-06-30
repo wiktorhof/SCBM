@@ -6,6 +6,8 @@ import os
 import numpy as np
 import random
 import torch
+import time
+from functools import wraps
 
 
 def reset_random_seeds(seed):
@@ -61,3 +63,23 @@ def numerical_stability_check(cov, device, epsilon=1e-6):
             num_added += epsilon
             epsilon *= 2
     return cov
+
+
+# def chronometer(function):
+#     @wraps
+#     def timer(*args, **kwargs):
+#         start = time.perf_counter()
+#         result = function(*args, **kwargs)
+#         end = time.perf_counter()
+#         run.log()
+#         return result
+#     return timer
+
+def save_trainable_params(model, filepath):
+    trainable_params = {
+        name: param.data for name, param in model.named_parameters() 
+        if param.requires_grad
+    }
+    torch.save(trainable_params, filepath)
+
+# torch.load(..., strict=False) - suggested by Perplexity for only loading some of the model's parameters

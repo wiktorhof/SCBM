@@ -28,15 +28,17 @@ from utils.training import (
     create_optimizer,
     train_one_epoch_cbm,
     train_one_epoch_scbm,
+    pretrain_one_epoch_pscbm,
     train_one_epoch_pscbm,
     validate_one_epoch_cbm,
     validate_one_epoch_scbm,
     generate_training_dataloader_pscbm,
     create_validation_dataloader_pscbm,
+    validate_one_epoch_pscbm_pretraining,
     validate_one_epoch_pscbm,
     Custom_Metrics,
 )
-from utils.utils import reset_random_seeds
+from utils.utils import reset_random_seeds, save_trainable_params
 
 
 def train(config):
@@ -188,7 +190,7 @@ def train(config):
         print(message)
         if config.model.get("load_weights", False):
             print(
-                "Pretrained weights have been loaded. The model's parameters aren't trained."
+                "Pretrained weights have been loaded. The CBM's parameters aren't trained."
             )
         else:
             print(
@@ -198,7 +200,9 @@ def train(config):
                 + str(config.model.concept_learning + "\n")
             )
             run.define_metric("epoch")
-
+            run.define_metric("train/epoch_time", step_metric="epoch")
+            run.define_metric("validation/epoch_time", step_metric="epoch")
+            
             # Pretraining autoregressive concept structure for AR baseline
             if (
                 config.model.get("pretrain_concepts")
@@ -336,37 +340,20 @@ def train(config):
                 test=True,
                 concept_names_graph=concept_names_graph,
             )
-        if config.model.model == "pscbm" and config.model.cov_type in ("global", "amortized"):
-            print("TRAINING THE PSCBM FOR INTERVENTIONS")
-            run.define_metric("epoch")
-            run.define_metric("train/lr", step_metric="epoch")
-            run.define_metric("train/epoch_time", step_metric="epoch")
-            run.define_metric("validation_cov_training/epoch_time", step_metric="epoch")
-            run.define_metric("train/model_evaluation_time", step_metric="epoch")
-            run.define_metric("train/masks_creation_time", step_metric="epoch")
-            run.define_metric("train/interventions_time", step_metric="epoch")
-            model.CBM.apply(freeze_module)
-            learnable_parameters = ""
-            for name, param in model.named_parameters():
-                if param.requires_grad:
-                    learnable_parameters += f"{name}\n"
-                    run.define_metric(f"train/{name}_gradient_norm", step_metric="epoch")
 
-            print(f"Learnable parameters:\n{learnable_parameters}")
+
+        ### PSCBM Training:
+        # 1. Covariance pre-training on regular inference
+        # 2. Interventions training with random policy and a proper policy 
+        # (currently: hard / simple_perc but it could be set up to follow configurations file)
+        if config.model.model == "pscbm" and config.model.cov_type in ("global", "amortized"):
+            # Define epoch metric
+            run.define_metric("epoch")
             
-            #TODO paramters for optimizer and scheduler should be optimized :-) Don't I exaggerate?
-            optimizer = create_optimizer(config.model, model)
-            # Reduce lr if training loss stops improving
-            lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-                    optimizer,
-                    mode='min',
-                    factor=1 / config.model.lr_divisor,
-                    patience=10
-                )
             intervention_strategy = define_strategy(
                 "simple_perc", train_loader, model, device, config
             ) if model.concept_learning == 'soft' else define_strategy(
-                "hard", train_loader, model, device, config
+                "simple_perc", train_loader, model, device, config
             )
             print("Generating a dataset for interventions validation...")
             start_time = time.perf_counter()
@@ -389,79 +376,149 @@ def train(config):
             interventions_training_dataloader = generate_training_dataloader_pscbm(train_loader, model, 0, config, device, run)
             generation_end_time = time.perf_counter()
             print(f"Training dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
-            for epoch in range(config.model.i_epochs):
-                # Calculate intervention curves during training and log them in a separate run:
-                if epoch % config.model.curves_every == 0:
-                    with wandb.init(
-                        project=config.logging.project,
-                        reinit="create_new",
-                        entity=config.logging.entity,
-                        config=OmegaConf.to_container(config, resolve=True),
-                        mode=config.logging.mode,
-                        tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
-                    ) as interventions_run:
-                        interventions_run.config['epoch'] = epoch # Log at which epoch the curves are calculated. This will allow better comparison
-                        if config.logging.mode in ["online", "disabled"]:
-                            interventions_run.name = run.name.split("-")[0] + "-" + config.experiment_name + "_epoch_" + str(epoch)
-                        else:
-                            interventions_run.name = config.experiment_name + "_epoch_" + str(epoch)
-                        intervene(
-                            train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
-                        )
-                # Validate the model periodically
-                if epoch % config.model.validate_per_epoch == 0:
-                    print(f"\nEVALUATION ON THE VALIDATION SET at epoch {epoch}:\n")
-                    val_start_time = time.perf_counter()
-                    validation_loss = validate_one_epoch_pscbm(
-                        interventions_validation_dataloader, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
-                    )
-                    val_end_time = time.perf_counter()
-                    val_time = val_end_time - val_start_time
-                    print(f"Validating the model took {val_time:.2f} s.")
-                    if validation_loss < best_validation_loss:
-                        best_validation_loss = validation_loss
-                        torch.save(model.sigma_concepts, join(experiment_path, "best_covariance.pth"))
-                    run.log({
-                        "validation_cov_training/epoch_time": val_time,
-                        })
+            
+            # Perform initial covariance training for p_epochs by only inferring concepts and target using model's covariance.
+            # Structure:
+            # 1. Define wandb metrics
+            # 2. Define which modules are trainable (only the covariance)
+            # TODO I might want to also train the head or concept predictor - at least for the interventions training
+            # 3. Having defined the trainable modules, create optimizer and lr_scheduler - separate for regular and separate
+            # for interventions training (!)
+            # 4. Train & validate. Every training epoch should be benchmarked for its runtime.
+            if config.model.get("pretrain_covariance", False):
 
-                train_start_time = time.perf_counter()
-                training_loss = train_one_epoch_pscbm(
-                    interventions_training_dataloader, 
-                    model, 
-                    optimizer, 
-                    metrics, 
-                    epoch, 
-                    config, 
-                    intervention_strategy, 
-                    loss_fn, 
-                    device, 
-                    run,
-                    num_masks=config.model.num_masks_train,
-                    mask_density=config.model.mask_density_train,
-                    )
-                train_end_time = time.perf_counter()
-                train_time = train_end_time - train_start_time
-                # print(f"Training the model for 1 epoch took {train_time:.2f} s.")
-                lr_scheduler.step(training_loss)
-                run.log({"train/lr": lr_scheduler.get_last_lr()[-1],
-                        "train/epoch_time": train_time,
-                    })
+                               
+                # Define wandb metrics
+                run.define_metric("train_cov/lr", step_metric="epoch")
+
+                # Freeze the CBM & report trainable parameters
+                model.CBM.apply(freeze_module)
+                learnable_parameters = []
+                for name, param in model.named_parameters():
+                    if param.requires_grad:
+                        learnable_parameters.append(name)
+                        run.define_metric(f"train_cov/{name}_gradient_norm", step_metric="epoch")
+                #TODO Test this
+                print(f"Learnable parameters:\n{learnable_parameters}")
+                # Create optimizer and lr_scheduler
+                optimizer = create_optimizer(config.model, model)
+                lr_scheduler = optim.lr_scheduler.StepLR(
+                    optimizer,
+                    step_size=0.5*config.model.p_epochs,
+                    gamma=0.1,
+                )
+                # TODO This I could do as an ablation for the appendix. For the main experiments stick to the same
+                # algorithm as used in the main models
+                # lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
+                #     optimizer,
+                #     model.p_epochs
+                # )
+                print("TRAINING THE PSCBM COVARIANCE ON INFERENCE")
+                start_time = time.perf_counter()
+                for epoch in range(config.model.p_epochs):
+                    # Training
+                    pretrain_one_epoch_pscbm(interventions_training_dataloader, model, optimizer, metrics, epoch, config, loss_fn, device, run)
+                    lr_scheduler.step()
+                    # Validation
+                    if epoch % config.model.validate_per_epoch == 0:
+                        validation_loss = validate_one_epoch_pscbm_pretraining(interventions_validation_dataloader, model, metrics, epoch, config, loss_fn, device, run)
+                        if validation_loss < best_validation_loss:
+                            save_trainable_params(model, join (experiment_path, "model_covariance_best.pth"))
+                            best_validation_loss = validation_loss
+                                
+                end_time = time.perf_counter()
+                print("Evaluating pre-trained covariance on the test set:")
+                validate_one_epoch_pscbm_pretraining(test_loader, model, metrics, config.model.p_epochs, config, loss_fn, device, run, test=True, precomputed_dataset=False)
                 
-                # model2 = create_model(config)
-                # for (name1, param1), (name2, param2) in zip(model.named_parameters(), model2.named_parameters()):
-                #     print(f"{name1}: equal" if param1.data.equal(param2.data) else f"{name1}: different") 
-                    # The output after 1 epoch is that all parameters are equal except sigma_concepts. This is what I expected.
-            if config.save_model:
-                torch.save(model.state_dict(), join(experiment_path, "model.pth"))
-                OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
-                print(f"\nTRAINING FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, 'model.pth')}", flush=True)
-            else:
-                print("\nTRAINING FINISHED", flush=True)
-            # Report the total training time
-            print(f"Training the model for {epoch+1} epochs took {time.strftime('%H:%M:%S', time.gmtime(train_end_time-start_time))}")
-        # Intervention curves
-        print("\nPERFORMING INTERVENTIONS:\n")
+                print(f"Training the covariance for {config.model.p_epochs} with validation every {config.model.validate_per_epoch} epochs took {(end_time-start_time):.2f}s.")
+                if config.save_model:
+                    torch.save(model.state_dict(), join(experiment_path, "model_covariance_pretrained.pth"))
+                    OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
+                    print(f"\nTRAINING FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, 'model_pretrained.pth')}", flush=True)
+                else:
+                    print("\nTRAINING FINISHED, pre-trained model not saved", flush=True)
+
+
+
+            # Train the model with interventions
+            if config.model.get("train_interventions", False):
+                print("TRAINING THE PSCBM COVARIANCE ON INTERVENTIONS")
+
+                # Define wandb metrics
+                run.define_metric("train_cov_int/lr", step_metric="epoch")
+                # Freeze the CBM & report trainable parameters
+                model.CBM.apply(freeze_module)
+                learnable_parameters = []
+                for name, param in model.named_parameters():
+                    if param.requires_grad:
+                        learnable_parameters.append(name)
+                        run.define_metric(f"train_cov_int/{name}_gradient_norm", step_metric="epoch")
+                #TODO Test this
+                print(f"Learnable parameters for interventions training:\n{learnable_parameters}")
+
+                optimizer = create_optimizer(config.model, model)
+                lr_scheduler = optim.lr_scheduler.StepLR(
+                    optimizer,
+                    step_size=0.5*config.model.i_epochs,
+                    gamma=0.1,
+                )
+
+                start_time = time.perf_counter()
+                for epoch in range(config.model.i_epochs):
+                    # Calculate intervention curves during training and log them in a separate run:
+                    # TODO Interventions curves should also be benchmarked for execution time
+                    if epoch % config.model.curves_every == 0:
+                        with wandb.init(
+                            project=config.logging.project,
+                            reinit="create_new",
+                            entity=config.logging.entity,
+                            config=OmegaConf.to_container(config, resolve=True),
+                            mode=config.logging.mode,
+                            tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
+                        ) as interventions_run:
+                            if config.logging.mode in ["online", "disabled"]:
+                                interventions_run.name = run.name.split("-")[0] + "-" + config.experiment_name + "_epoch_" + str(epoch)
+                            else:
+                                interventions_run.name = config.experiment_name + "_epoch_" + str(epoch)
+                            intervene(
+                                train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
+                            )
+
+                    train_one_epoch_pscbm(
+                        interventions_training_dataloader, 
+                        model, 
+                        optimizer, 
+                        metrics, 
+                        epoch, 
+                        config, 
+                        intervention_strategy, 
+                        loss_fn, 
+                        device, 
+                        run,
+                        num_masks=config.model.num_masks_train,
+                        mask_density=config.model.mask_density_train,
+                        )
+                    lr_scheduler.step()
+                        
+                    # Validate the model periodically
+                    if epoch % config.model.validate_per_epoch == 0 or epoch < 20: # In the initial phase of training validation seems crucial to me.
+                        print(f"\nEVALUATION ON THE VALIDATION SET at epoch {epoch}:\n")
+                        validation_loss = validate_one_epoch_pscbm(
+                            interventions_validation_dataloader, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
+                        )
+                        if validation_loss < best_validation_loss:
+                            save_trainable_params(model, join (experiment_path, "model_covariance_best.pth"))
+                            best_validation_loss = validation_loss
+                end_time=time.perf_counter()
+                print(f"Training the model on interventions for {config.model.i_epochs} epochs took {time.strftime('%H:%M:%S', time.gmtime(end_time-start_time))}")
+                if config.save_model:
+                    torch.save(model.state_dict(), join(experiment_path, "model_trained_int.pth"))
+                    OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
+                    print(f"\nTRAINING ON INTERVENTIONS FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, 'model_trained_int.pth')}", flush=True)
+                else:
+                    print("\nTRAINING ON INTERVENTIONS FINISHED", flush=True)
+            # Intervention curves
+        print("\nPERFORMING INTERVENTIONS ON THE FINAL TRAINED MODEL:\n")
         intervene(
             train_loader, test_loader, model, metrics, t_epochs, config, loss_fn, device, run
         )

@@ -13,6 +13,7 @@ from scipy.stats import chi2
 from torchmin import minimize
 from tqdm import tqdm
 import pandas as pd
+import time
 
 from utils.minimize_constraint import minimize_constr
 from utils.utils import numerical_stability_check
@@ -32,6 +33,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
     run.define_metric("intervention/num_concepts_intervened")
     for strategy in strategies:
         for policy in policies:
+            start_time = time.perf_counter()
             intervention_dataset_base = []
             intervention_dataset_fixed = []
 
@@ -267,6 +269,8 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                     ],
                     *intervention_dataset_fixed,
                 )
+            end_time = time.perf_counter()
+            run.log({f"intervention_{strategy}_{policy}/total_time": end_time-start_time})
             # DEBUG
             # os.makedirs(f"saved_tensors/{policy}", exist_ok=True)
             # with pd.ExcelWriter(f'saved_tensors/{policy}/covariances_scaling_{config.model.covariance_scaling}.xlsx',
@@ -337,6 +341,7 @@ def intervene_scbm(
 
         # Intervening with different policies
         for policy in policies:
+            start_time = time.perf_counter()
             intervention_dataset_base = []
             intervention_dataset_fixed = []
             try:
@@ -598,6 +603,8 @@ def intervene_scbm(
                     ],
                     *intervention_dataset_fixed,
                 )
+            end_time = time.perf_counter()
+            run.log({f"intervention_{strategy}_{policy}/total_time": end_time-start_time})
     return
 
 
@@ -641,6 +648,7 @@ def intervene_cbm(
     for strategy in strategies:
         # Intervening with different policies
         for policy in policies:
+            start_time = time.perf_counter()
             intervention_dataset_base = []
 
             try:
@@ -862,6 +870,8 @@ def intervene_cbm(
                 concepts_dataset_mask = torch.cat(
                     concepts_dataset_mask_new, dim=0
                 ).cpu()
+        end_time = time.perf_counter()
+        run.log({f"intervention_{strategy}_{policy}/total_time": end_time-start_time})
     return
 
 

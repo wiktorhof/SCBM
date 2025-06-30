@@ -12,32 +12,36 @@ from tqdm import tqdm
 from torchmetrics import Metric
 from torchmetrics.utilities import dim_zero_cat
 import wandb
+import time
 from time import perf_counter
 
 from utils.metrics import calc_target_metrics, calc_concept_metrics
 from utils.plotting import compute_and_plot_heatmap
+
 
 def generate_training_dataloader_pscbm(
     train_loader, model, epoch, config, device, run
 ):
     model.eval()
     training_dataset = []
-    for batch in tqdm(
-        train_loader, desc="Generating dataset for interventions training", position=0, leave=True
-        ):
-        batch_features, target_true, concepts_true = batch["features"].to(device), batch["labels"].to(device), batch["concepts"].to(device)
-        if config.model.cov_type == "global":
-            concepts_pred_probs, _, _, _ = model(batch_features, epoch)
-            training_dataset.append(
-                [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), ]
-                )
-        elif config.model.cov_type == "amortized":
-            concepts_pred_probs, _, _, _, intermediate = model(batch_features, epoch, return_intermediate=True)
-            training_dataset.append(
-                [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), intermediate.cpu(), ]
-                )
-        else:
-            raise ValueError(f"Covariance training is only possible in the amortized and global variants. The passed argument is {config.model.cov_type}.")
+    with torch.no_grad():
+        for batch in tqdm(
+            train_loader, desc="Generating dataset for interventions training", position=0, leave=True
+            ):
+            batch_features, target_true, concepts_true = batch["features"].to(device), batch["labels"].to(device), batch["concepts"].to(device)
+            if config.model.cov_type == "global" and not config.model.get("pretrain_cov", False):
+                concepts_pred_probs, _, _, _ = model(batch_features, epoch)
+                training_dataset.append(
+                    [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), ]
+                    )
+            # If
+            elif config.model.cov_type == "amortized":
+                concepts_pred_probs, _, _, _, intermediate = model(batch_features, epoch, return_intermediate=True)
+                training_dataset.append(
+                    [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), intermediate.cpu(), ]
+                    )
+            else:
+                raise ValueError(f"Covariance training is only possible in the amortized and global variants. The passed argument is {config.model.cov_type}.")
     training_dataset = [
         torch.cat(
             [sublist[i] for sublist in training_dataset], dim=0
@@ -48,6 +52,74 @@ def generate_training_dataloader_pscbm(
     training_dataloader = DataLoader(training_dataset, batch_size=config.model.train_batch_size, num_workers=config.workers, shuffle=True, pin_memory=True, drop_last=True)
     return training_dataloader
 
+def pretrain_one_epoch_pscbm(
+    train_loader, model, optimizer, metrics, epoch, config, loss_fn, device, run):
+    """
+    Pretrain the Probabilistic Stochastic Concept Bottleneck Model (PSCBM) for one epoch. This method doesn't use interventions. Instead, the 
+    covariance matrix is trained in a standard way, i.e. the model is trained to predict concepts and target labels. All other elements of the model
+    (encoder, concept head, target head) are frozen.
+    Args:
+        train_loader (torch.utils.data.DataLoader): DataLoader for the training data. It provides precomputed intermediate representations
+        of the training dataset to the end of accelerating the training.
+        model (torch.nn.Module): The PSCBM model to be trained.
+        optimizer (torch.optim.Optimizer): The optimizer for training the model.
+        metrics (object): An object to track and compute metrics during training.
+        epoch (int): The current epoch number.
+        config (dict): Configuration dictionary containing model and training settings.
+        loss_fn (callable): The loss function used to compute losses.
+        device (torch.device): The device to run the computations on.
+    """
+    model.train()
+    metrics.reset()
+
+    start = time.perf_counter()
+
+    for k, batch in enumerate(
+        tqdm(train_loader, desc=f"Epoch {epoch + 1}", position=0, leave=True)
+    ):
+        batch_features, target_true, concepts_true, _, intermediate = (item.to(device) for item in batch)
+        concepts_pred_probs, target_pred_logits, concepts, concepts_cov = model(batch_features, epoch, intermediate=intermediate, use_covariance=True)
+        target_loss, concepts_loss, prec_loss, total_loss = loss_fn(concepts, concepts_true, target_pred_logits, target_true, concepts_cov, cov_not_triang=True)
+        optimizer.zero_grad()
+        total_loss.backward()
+        for name, p in model.named_parameters():
+            if p.grad is not None:
+                p_norm = p.grad.data.norm(2)
+                run.log({f"train_cov/{name}_gradient_norm": p_norm})
+                print(f"train_cov/{name}_gradient_norm: {p_norm}")
+        optimizer.step()
+        c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
+
+        # Store predictions
+        metrics.update(
+            target_loss,
+            concepts_loss,
+            total_loss,
+            target_true,
+            target_pred_logits,
+            concepts_true,
+            concepts_pred_probs,
+            prec_loss=prec_loss,
+            cov_norm=c_norm,
+        )
+    end = time.perf_counter()
+    metrics_dict = metrics.compute(config=config)
+    if epoch == 0:
+        for (k,v) in metrics_dict.items():
+            run.define_metric(f"train_cov/{k}", step_metric="epoch")
+            run.define_metric(f"train_cov/epoch_time", step_metric="epoch")
+    log_dict = {f"train_cov/{k}": v for (k, v) in metrics_dict.items()}
+    log_dict.update({"epoch": epoch + 1, "train_cov/epoch_time": end-start})
+    
+    run.log(log_dict)    
+
+    prints = f"Epoch {epoch + 1}, Train     : "
+    for key, value in metrics_dict.items():
+        prints += f"{key}: {value:.3f} "
+    print(prints)
+    metrics.reset()
+
+    return metrics_dict['total_loss']
 
 def train_one_epoch_pscbm(
     train_loader, model, optimizer, metrics, epoch, config, 
@@ -71,12 +143,9 @@ def train_one_epoch_pscbm(
     """
     model.train()
     metrics.reset()
-    run.log({"epoch": epoch+1})
+    # run.log({"epoch": epoch+1})
 
-    model_time = 0.0
-    mask_time = 0.0
-    interventions_time = 0.0
-
+    start = time.perf_counter()
     # Calculate the number of ones in an intervention mask. It is a list of 1 or 2 elements.
     # If len(num_ones) == 1, it is the constant number of ones for every mask
     # If len(num_ones) == 2, it contains the lower and upper bounds for the number of ones per mask
@@ -165,21 +234,23 @@ def train_one_epoch_pscbm(
         for name, p in model.named_parameters():
             if p.grad is not None:
                 p_norm = p.grad.data.norm(2)
-                run.log({f"train/{name}_gradient_norm": p_norm})
-                print(f"train/{name}_gradient_norm: {p_norm}")
+                run.log({f"train_cov_int/{name}_gradient_norm": p_norm})
+                print(f"train_cov_int/{name}_gradient_norm: {p_norm}")
 
 
         optimizer.step()
         optimizer.zero_grad()
         # timestamp4 = perf_counter()
         # interventions_time += (timestamp4-timestamp3)
+    end = time.perf_counter
     # Calculate and log metrics
     metrics_dict = metrics.compute(config=config)
     if epoch == 0:
         for (k,v) in metrics_dict.items():
-            run.define_metric(f"train/{k}", step_metric="epoch")
-    log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
-    # log_dict.update({"epoch": epoch + 1})
+            run.define_metric(f"train_cov_int/{k}", step_metric="epoch")
+            run.define_metric(f"train_cov_int/epoch_time", step_metric="epoch")
+    log_dict = {f"train_cov_int/{k}": v for (k, v) in metrics_dict.items()}
+    log_dict.update({"epoch": epoch + 1, "train_cov_int/epoch_time": end-time})
     run.log(log_dict)    
 
     prints = f"Epoch {epoch + 1}, Train     : "
@@ -235,6 +306,7 @@ def train_one_epoch_scbm(
     model.train()
     metrics.reset()
 
+    start = time.perf_counter()
     if (
         config.model.training_mode == "sequential"
         or config.model.training_mode == "independent"
@@ -289,14 +361,16 @@ def train_one_epoch_scbm(
             concepts_pred_probs,
             prec_loss=prec_loss,
         )
-
+    
+    end = time.perf_counter()
     # Calculate and log metrics
     metrics_dict = metrics.compute()
     if epoch == 0:
         for i, (k, v) in enumerate(metrics_dict.items()):
             run.define_metric(f"train/{k}", step_metric="epoch")
+            run.define_metric(f"train/epoch_time", step_metric="epoch")
     log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
-    log_dict.update({"epoch": epoch + 1})
+    log_dict.update({"epoch": epoch + 1, "train/epoch_time": end-start})
     run.log(log_dict)
     # run.log({f"train/{k}": v for k, v in metrics_dict.items()})
     # run.log({"epoch": epoch + 1})
@@ -344,6 +418,7 @@ def train_one_epoch_cbm(
     model.train()
     metrics.reset()
 
+    start = time.perf_counter()
     if config.model.training_mode in ("sequential", "independent"):
         if mode == "c":
             model.head.eval()
@@ -397,13 +472,15 @@ def train_one_epoch_cbm(
             concepts_pred_probs,
         )
 
+    end = time.perf_counter()
     # Calculate and log metrics
     metrics_dict = metrics.compute()
     if epoch == 0:
         for i, (k, v) in enumerate(metrics_dict.items()):
             run.define_metric(f"train/{k}", step_metric="epoch")
+            run.define_metric(f"train/epoch_time", step_metric="epoch")
     log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
-    log_dict.update({"epoch": epoch + 1})
+    log_dict.update({"epoch": epoch + 1, "train/epoch_time": end-start})
     run.log(log_dict)
     prints = f"Epoch {epoch + 1}, Train     : "
     for key, value in metrics_dict.items():
@@ -504,9 +581,9 @@ def create_validation_dataloader_pscbm(
             # (masks.sum(dim=2)==num_ones).all()
             # )
             masks_dataset.append(masks)
-            if config.model.cov_type == "global":
+            if config.model.cov_type == "global" and not config.model.pretrain_covariance:
                 concepts_pred_probs, _, _, _ = model(batch_features, epoch=0, validation=True)
-            elif config.model.cov_type == "amortized":
+            elif config.model.cov_type == "amortized" or config.model.pretrain_covariance:
                 concepts_pred_probs, _, _, _, intermediate = model(batch_features, epoch=0, validation=True, return_intermediate=True)
             else:
                 raise ValueError()
@@ -515,7 +592,7 @@ def create_validation_dataloader_pscbm(
             # Behaves in CEM case.
             concepts_mcmc_probs = concepts_pred_probs.unsqueeze(-1)
             # target_loss, concepts_loss, precision_loss, total_loss = loss_fn(concepts_mcmc_probs, concepts_true, target_pred_logits_interv, target_true, concepts_cov, cov_not_triang=True)
-            if config.model.cov_type == "global":
+            if config.model.cov_type == "global" and not config.model.pretrain_covariance:
                 intervention_validation_dataset.append(
                     [
                         # target_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
@@ -577,7 +654,60 @@ def create_validation_dataloader_pscbm(
         return intervention_validation_loader
 
 
-            
+def validate_one_epoch_pscbm_pretraining(loader, model, metrics, epoch, config, loss_fn, device, run, test=False, precomputed_dataset=True):
+    model.eval()
+    metrics.reset()
+    start = time.perf_counter()
+    for k,batch in enumerate(loader):
+        if precomputed_dataset:
+            (
+                concepts_pred_mu, concepts_true, target_true, batch_features, intermediate, masks
+            ) = (item.to(device) for item in batch)
+            concepts_pred_probs, target_pred_logits, concepts, concepts_cov = model(batch_features, epoch, intermediate=intermediate, use_covariance=True)
+        else: #For test we don't generate a precomputed dataset as it would only be used once in the very end anyway.
+            batch_features, concepts_true, target_true = batch["features"].to(device), batch["concepts"].to(device), batch["labels"].to(device)
+            concepts_pred_probs, target_pred_logits, concepts, concepts_cov = model(batch_features, epoch, intermediate=None, use_covariance=True)
+        target_loss, concepts_loss, prec_loss, total_loss = loss_fn(concepts, concepts_true, target_pred_logits, target_true, concepts_cov, cov_not_triang=True)
+        c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
+
+        # Store predictions
+        metrics.update(
+            target_loss,
+            concepts_loss,
+            total_loss,
+            target_true,
+            target_pred_logits,
+            concepts_true,
+            concepts_pred_probs,
+            prec_loss=prec_loss,
+            cov_norm=c_norm,
+        )
+    end = time.perf_counter()
+    metrics_dict = metrics.compute(config=config)
+    if not test:
+        if epoch == 0:
+            for (k,v) in metrics_dict.items():
+                run.define_metric(f"validation_cov/{k}", step_metric="epoch")
+                run.define_metric(f"validation_cov/epoch_time", step_metric="epoch")
+        log_dict = {f"validation_cov/{k}": v for (k, v) in metrics_dict.items()}
+        log_dict.update({"epoch": epoch, "validation_cov/epoch_time": end-start})
+        run.log(log_dict)
+        prints = f"Epoch {epoch}, Validation: "
+    else:
+        # if epoch == 0:
+        for (k,v) in metrics_dict.items():
+            run.define_metric(f"test_cov/{k}", step_metric="epoch")
+            run.define_metric(f"test_cov/epoch_time", step_metric="epoch")
+        log_dict = {f"test_cov/{k}": v for (k, v) in metrics_dict.items()}
+        log_dict.update({"epoch": epoch, "test_cov/epoch_time": end-time})
+        run.log(log_dict)
+        prints = f"Test: "
+    for key, value in metrics_dict.items():
+        prints += f"{key}: {value:.3f} "
+    print(prints)
+    print()
+    metrics.reset()
+    return metrics_dict["total_loss"]    
 
 def validate_one_epoch_pscbm(
     loader,
@@ -598,6 +728,7 @@ def validate_one_epoch_pscbm(
     """
     model.eval()
     metrics.reset()
+    start = time.perf_counter()
     with torch.no_grad():
         for k, batch in enumerate(tqdm(loader, desc=f"Epoch {epoch+1}", position=0, leave=True)):
             if config.model.cov_type == "global":
@@ -643,21 +774,24 @@ def validate_one_epoch_pscbm(
                     cov_norm=c_norm,
                     prec_loss=precision_loss
                 )
+        end = time.perf_counter()
         metrics_dict = metrics.compute(validation=True, config=config)
         if not test:
             if epoch == 0:
                 for (k,v) in metrics_dict.items():
-                    run.define_metric(f"validation_cov_training/{k}", step_metric="epoch")
-            log_dict = {f"validation_cov_training/{k}": v for (k, v) in metrics_dict.items()}
-            log_dict.update({"epoch": epoch})
+                    run.define_metric(f"validation_cov_int/{k}", step_metric="epoch")
+                    run.define_metric(f"validation_cov_int/epoch_time", step_metric="epoch")
+            log_dict = {f"validation_cov_int/{k}": v for (k, v) in metrics_dict.items()}
+            log_dict.update({"epoch": epoch, "validation_cov_int/epoch_time": end-start})
             run.log(log_dict)
             prints = f"Epoch {epoch}, Validation: "
         else:
             if epoch == 0:
                 for (k,v) in metrics_dict.items():
-                    run.define_metric(f"test_cov_training/{k}", step_metric="epoch")
-            log_dict = {f"test_cov_training/{k}": v for (k, v) in metrics_dict.items()}
-            log_dict.update({"epoch": epoch})
+                    run.define_metric(f"test_cov_int/{k}", step_metric="epoch")
+                    run.define_metric("test_cov_int/epoch_time", step_metric="epoch")
+            log_dict = {f"test_cov_int/{k}": v for (k, v) in metrics_dict.items()}
+            log_dict.update({"epoch": epoch, "test_cov_int/epoch_time": end-start})
             run.log(log_dict)
             prints = f"Test: "
         for key, value in metrics_dict.items():
@@ -712,6 +846,7 @@ def validate_one_epoch_scbm(
         - During testing, the function generates and plots a heatmap of the concept correlation matrix.
     """
     model.eval()
+    start = time.perf_counter()
     with torch.no_grad():
 
         for k, batch in enumerate(
@@ -763,6 +898,7 @@ def validate_one_epoch_scbm(
                 prec_loss=prec_loss,
             )
 
+    end = time.perf_counter()
     # Calculate and log metrics
     metrics_dict = metrics.compute(validation=True, config=config)
 
@@ -770,16 +906,18 @@ def validate_one_epoch_scbm(
         if epoch == 0:
             for (k,v) in metrics_dict.items():
                 run.define_metric(f"validation/{k}", step_metric="epoch")
+                run.define_metric(f"validation/epoch_time", step_metric="epoch")
         log_dict = {f"validation/{k}": v for (k, v) in metrics_dict.items()}
-        log_dict.update({"epoch": epoch})
+        log_dict.update({"epoch": epoch, "validation/epoch_time": end-start})
         run.log(log_dict)
         prints = f"Epoch {epoch}, Validation: "
     else:
         if epoch == 0:
             for (k,v) in metrics_dict.items():
                 run.define_metric(f"test/{k}", step_metric="epoch")
+                run.define_metric(f"test/epoch_time", step_metric="epoch")
         log_dict = {f"test/{k}": v for (k, v) in metrics_dict.items()}
-        log_dict.update({"epoch": epoch})
+        log_dict.update({"epoch": epoch, "test/epoch_time": end-start})
         run.log(log_dict)
         prints = f"Test: "
     for key, value in metrics_dict.items():
@@ -828,6 +966,7 @@ def validate_one_epoch_cbm(
     """
     model.eval()
 
+    start = time.perf_counter()
     with torch.no_grad():
         for k, batch in enumerate(
             tqdm(loader, desc=f"Epoch {epoch}", position=0, leave=True)
@@ -866,22 +1005,25 @@ def validate_one_epoch_cbm(
                 concepts_pred_probs,
             )
 
+    end = time.perf_counter()
     # Calculate and log metrics
     metrics_dict = metrics.compute(validation=True, config=config)
     if not test:
         if epoch == 0:
             for (k, v) in metrics_dict.items():
                 run.define_metric(f"validation/{k}", step_metric="epoch")
+                run.define_metric(f"validation/epoch_time", step_metric="epoch")
         log_dict = {f"validation/{k}": v for (k, v) in metrics_dict.items()}
-        log_dict.update({"epoch": epoch})
+        log_dict.update({"epoch": epoch, "validation/epoch_time": end-start})
         run.log(log_dict)
         prints = f"Epoch {epoch}, Validation: "
     else:
         if epoch == 0:
             for (k, v) in metrics_dict.items():
                 run.define_metric(f"test/{k}", step_metric="epoch")
+                run.define_metric(f"test/epoch_time", step_metric="epoch")
         log_dict = {f"test/{k}": v for (k, v) in metrics_dict.items()}
-        log_dict.update({"epoch": epoch})
+        log_dict.update({"epoch": epoch, "test/epoch_time": end-start})
         run.log(log_dict)
         prints = f"Test: "
     for key, value in metrics_dict.items():
@@ -912,7 +1054,10 @@ def create_optimizer(config, model):
     if config.optimizer == "sgd":
         return torch.optim.SGD(optim_params)
     elif config.optimizer == "adam":
-        return torch.optim.Adam(optim_params)
+        if optim_params[0]["weight_decay"] == 0.0:
+            return torch.optim.Adam(optim_params)
+        else:
+            return torch.optim.AdamW(optim_params)
 
 
 class Custom_Metrics(Metric):

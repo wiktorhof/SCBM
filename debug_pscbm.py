@@ -28,11 +28,13 @@ from utils.training import (
     create_optimizer,
     train_one_epoch_cbm,
     train_one_epoch_scbm,
+    pretrain_one_epoch_pscbm,
     train_one_epoch_pscbm,
     validate_one_epoch_cbm,
     validate_one_epoch_scbm,
     generate_training_dataloader_pscbm,
     create_validation_dataloader_pscbm,
+    validate_one_epoch_pscbm_pretraining,
     validate_one_epoch_pscbm,
     Custom_Metrics,
 )
@@ -360,8 +362,9 @@ def train(config):
             lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
                     optimizer,
                     mode='min',
-                    factor=1 / config.model.lr_divisor,
-                    patience=10
+                    factor=0.1,
+                    patience=5,
+                    min_lr=1e-6,
                 )
             # If training an amortized covariance, I expect improvement from reducing the learning rate after 10 epochs
             if config.model.get("use_sequential_lr", False):
@@ -394,68 +397,82 @@ def train(config):
             interventions_training_dataloader = generate_training_dataloader_pscbm(train_loader, model, 0, config, device, run)
             generation_end_time = time.perf_counter()
             print(f"Training dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
-            for epoch in range(config.model.i_epochs):
-                # Calculate intervention curves during training and log them in a separate run:
-                # if epoch % config.model.curves_every == 0:
-                #     with wandb.init(
-                #         project=config.logging.project,
-                #         reinit="create_new",
-                #         entity=config.logging.entity,
-                #         config=OmegaConf.to_container(config, resolve=True),
-                #         mode=config.logging.mode,
-                #         tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
-                #     ) as interventions_run:
-                #         if config.logging.mode in ["online", "disabled"]:
-                #             interventions_run.name = run.name.split("-")[0] + "-" + config.experiment_name + "_epoch_" + str(epoch)
-                #         else:
-                #             interventions_run.name = config.experiment_name + "_epoch_" + str(epoch)
-                #         intervene(
-                #             train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
-                #         )
-                # Validate the model periodically
-                if epoch % config.model.validate_per_epoch == 0:
-                    print(f"\nEVALUATION ON THE VALIDATION SET at epoch {epoch}:\n")
-                    val_start_time = time.perf_counter()
-                    validation_loss = validate_one_epoch_pscbm(
-                        interventions_validation_dataloader, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
-                    )
-                    val_end_time = time.perf_counter()
-                    val_time = val_end_time - val_start_time
-                    print(f"Validating the model took {val_time:.2f} s.")
-                    if validation_loss < best_validation_loss:
-                        best_validation_loss = validation_loss
-                        torch.save(model.sigma_concepts, join(experiment_path, "best_covariance.pth"))
-                    run.log({
-                        "validation_cov_training/epoch_time": val_time,
+            
+            # Perform <<covariance pretraining>> for p_epochs by only inferring concepts and target using model's covariance.
+            if config.model.get("pretrain_covariance", False):
+                for epoch in range(config.model.p_epochs):
+                    if epoch % config.model.validate_per_epoch == 0:
+                        validate_one_epoch_pscbm_pretraining(interventions_validation_dataloader, model, metrics, epoch, config, loss_fn, device, run)
+                    pretrain_one_epoch_pscbm(interventions_training_dataloader, model, optimizer, metrics, epoch, config, loss_fn, device, run)
+                print("Evaluating pre-trained covariance on the test set:")
+                validate_one_epoch_pscbm_pretraining(test_loader, model, metrics, config.model.p_epochs, config, loss_fn, device, run, test=True, precomputed_dataset=False)
+            # Train the model with interventions
+            if config.model.get("train_interventions", False):
+                for epoch in range(config.model.i_epochs):
+                    # Calculate intervention curves during training and log them in a separate run:
+                    # if epoch % config.model.curves_every == 0:
+                    #     with wandb.init(
+                    #         project=config.logging.project,
+                    #         reinit="create_new",
+                    #         entity=config.logging.entity,
+                    #         config=OmegaConf.to_container(config, resolve=True),
+                    #         mode=config.logging.mode,
+                    #         tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
+                    #     ) as interventions_run:
+                    #         if config.logging.mode in ["online", "disabled"]:
+                    #             interventions_run.name = run.name.split("-")[0] + "-" + config.experiment_name + "_epoch_" + str(epoch)
+                    #         else:
+                    #             interventions_run.name = config.experiment_name + "_epoch_" + str(epoch)
+                    #         intervene(
+                    #             train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
+                    #         )
+
+                    train_start_time = time.perf_counter()
+                    training_loss = train_one_epoch_pscbm(
+                        interventions_training_dataloader, 
+                        model, 
+                        optimizer, 
+                        metrics, 
+                        epoch, 
+                        config, 
+                        intervention_strategy, 
+                        loss_fn, 
+                        device, 
+                        run,
+                        num_masks=config.model.num_masks_train,
+                        mask_density=config.model.mask_density_train,
+                        )
+                    train_end_time = time.perf_counter()
+                    train_time = train_end_time - train_start_time
+                    print(f"Training the model for 1 epoch took {train_time:.2f} s.")
+                    # lr_scheduler.step(training_loss)
+                    run.log({"train/lr": lr_scheduler.get_last_lr()[-1],
+                            "train/epoch_time": train_time,
                         })
 
-                train_start_time = time.perf_counter()
-                training_loss = train_one_epoch_pscbm(
-                    interventions_training_dataloader, 
-                    model, 
-                    optimizer, 
-                    metrics, 
-                    epoch, 
-                    config, 
-                    intervention_strategy, 
-                    loss_fn, 
-                    device, 
-                    run,
-                    num_masks=config.model.num_masks_train,
-                    mask_density=config.model.mask_density_train,
-                    )
-                train_end_time = time.perf_counter()
-                train_time = train_end_time - train_start_time
-                print(f"Training the model for 1 epoch took {train_time:.2f} s.")
-                lr_scheduler.step(training_loss)
-                run.log({"train/lr": lr_scheduler.get_last_lr()[-1],
-                        "train/epoch_time": train_time,
-                    })
-                
-                # model2 = create_model(config)
-                # for (name1, param1), (name2, param2) in zip(model.named_parameters(), model2.named_parameters()):
-                #     print(f"{name1}: equal" if param1.data.equal(param2.data) else f"{name1}: different") 
-                    # The output after 1 epoch is that all parameters are equal except sigma_concepts. This is what I expected.
+                        
+                    # Validate the model periodically
+                    if epoch % config.model.validate_per_epoch == 0 or epoch < 20: # In the initial phase of training validation seems crucial to me.
+                        print(f"\nEVALUATION ON THE VALIDATION SET at epoch {epoch}:\n")
+                        val_start_time = time.perf_counter()
+                        validation_loss = validate_one_epoch_pscbm(
+                            interventions_validation_dataloader, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
+                        )
+                        lr_scheduler.step(validation_loss)
+                        val_end_time = time.perf_counter()
+                        val_time = val_end_time - val_start_time
+                        print(f"Validating the model took {val_time:.2f} s.")
+                        if validation_loss < best_validation_loss:
+                            best_validation_loss = validation_loss
+                            torch.save(model.sigma_concepts, join(experiment_path, "best_covariance.pth"))
+                        run.log({
+                            "validation_cov_training/epoch_time": val_time,
+                            })
+                    
+                    # model2 = create_model(config)
+                    # for (name1, param1), (name2, param2) in zip(model.named_parameters(), model2.named_parameters()):
+                    #     print(f"{name1}: equal" if param1.data.equal(param2.data) else f"{name1}: different") 
+                        # The output after 1 epoch is that all parameters are equal except sigma_concepts. This is what I expected.
             if config.save_model:
                 torch.save(model.state_dict(), join(experiment_path, "model.pth"))
                 OmegaConf.save(config=config, f=join(experiment_path, "config.yaml"))
