@@ -26,6 +26,7 @@ from utils.training import (
     freeze_module,
     unfreeze_module,
     create_optimizer,
+    create_lr_scheduler,
     train_one_epoch_cbm,
     train_one_epoch_scbm,
     pretrain_one_epoch_pscbm,
@@ -357,6 +358,8 @@ def train(config):
             )
             print("Generating a dataset for interventions validation...")
             start_time = time.perf_counter()
+            # Fix seed before validation dataloader's generation s.t. the validation dataset remains the same for all model evaluations (even though it will still necessarily differ for different underlying CBMs)
+            reset_random_seeds(42)
             interventions_validation_dataloader = create_validation_dataloader_pscbm(
                 val_loader,
                 model,
@@ -369,6 +372,7 @@ def train(config):
                 num_masks=config.model.num_masks_val,
                 mask_density=config.model.mask_density_val,
             )
+            reset_random_seeds(config.seed)
             end_time = time.perf_counter()
             best_validation_loss = torch.inf
             print(f"Validation dataset has been generated in {(end_time - start_time):.2f} seconds.")
@@ -402,11 +406,7 @@ def train(config):
                 print(f"Learnable parameters:\n{learnable_parameters}")
                 # Create optimizer and lr_scheduler
                 optimizer = create_optimizer(config.model, model)
-                lr_scheduler = optim.lr_scheduler.StepLR(
-                    optimizer,
-                    step_size=0.5*config.model.p_epochs,
-                    gamma=0.1,
-                )
+                lr_scheduler = create_lr_scheduler(config, optimizer, interventions=False)
                 # TODO This I could do as an ablation for the appendix. For the main experiments stick to the same
                 # algorithm as used in the main models
                 # lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
@@ -417,6 +417,7 @@ def train(config):
                 start_time = time.perf_counter()
                 for epoch in range(config.model.p_epochs):
                     # Training
+                    run.log({"train_cov/lr": lr_scheduler.get_last_lr()[0]})
                     pretrain_one_epoch_pscbm(interventions_training_dataloader, model, optimizer, metrics, epoch, config, loss_fn, device, run)
                     lr_scheduler.step()
                     # Validation
@@ -457,17 +458,13 @@ def train(config):
                 print(f"Learnable parameters for interventions training:\n{learnable_parameters}")
 
                 optimizer = create_optimizer(config.model, model)
-                lr_scheduler = optim.lr_scheduler.StepLR(
-                    optimizer,
-                    step_size=0.5*config.model.i_epochs,
-                    gamma=0.1,
-                )
+                lr_scheduler = create_lr_scheduler(config, optimizer, interventions=True)
 
                 start_time = time.perf_counter()
                 for epoch in range(config.model.i_epochs):
                     # Calculate intervention curves during training and log them in a separate run:
                     # TODO Interventions curves should also be benchmarked for execution time
-                    if epoch % config.model.curves_every == 0:
+                    if config.model.get("calculate_curves", True) and epoch % config.model.curves_every == 0:
                         with wandb.init(
                             project=config.logging.project,
                             reinit="create_new",
@@ -483,7 +480,7 @@ def train(config):
                             intervene(
                                 train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
                             )
-
+                    run.log({"train_cov_int/lr": lr_scheduler.get_last_lr()[0]})
                     train_one_epoch_pscbm(
                         interventions_training_dataloader, 
                         model, 

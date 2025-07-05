@@ -13,7 +13,7 @@ decrease_every: 150 # Frequency of the learning rate decrease
 lr_divisor: 2 # Rate of the learning rate decrease
 weight_decay: 0 # Weight decay
 train_batch_size: 64 # Batch size for the training set
-val_batch_size: 64 # Batch size for the validation and test sets
+val_batch_size: 128 # Batch size for the validation and test sets
 
 j_epochs: 300 # Number of epochs for joint training
 c_epochs: 200 # Number of epochs for first stage training in sequential & independent training

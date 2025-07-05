@@ -13,18 +13,50 @@ data='CUB'
 mem='20G'
 encoder_arch='resnet18'
 model='PSCBM'
-i=42
-#concept_learning='hard'
+i=10
+
+data_ratio=1
+covariance_scaling=1.0001
+concept_learning='hard'
+cov='amortized'
+train_batch_size=128
+reg_weight=1
+mask_density=0.2
 
 save_model='True'
 save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 
-for concept_learning in 'hard'
+for lr_scheduler in 'step' 'cosine'
 do
-tag=${model}_${concept_learning}
-sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch save_model=${save_model} experiment_dir=${save_model_dir}
-echo Job submitted
-done;
-                                                                                                                                                                 
+#for lr in 0.001 0.0001 0.00001
+for lr in 0.0001
+do
+#for weight_decay in 0 0.01
+for weight_decay in 0.01
+do
+	    tag=${model}_${cov}_inference_${lr_scheduler}_${lr}_decay_${weight_decay}
+            sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
+            +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
+            model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
+            save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
+            model.cov_type=${cov} model.mask_density_train=${mask_density} \
+            model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} \
+            model.p_epochs=200 model.i_epochs=200 model.lr_scheduler=${lr_scheduler} \
+	    model.train_interventions=False model.pretrain_covariance=True \
+	    model.calculate_curves=False model.learning_rate=${lr} model.weight_decay=${weight_decay}
+
+	    tag=${model}_${cov}_intervention_${lr_scheduler}_${lr}_decay_${weight_decay}
+            sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
+            +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
+            model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
+            save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
+            model.cov_type=${cov} model.mask_density_train=${mask_density} \
+            model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} \
+            model.p_epochs=200 model.i_epochs=400 model.lr_scheduler=${lr_scheduler} \
+	    model.train_interventions=True model.pretrain_covariance=False \
+	    model.calculate_curves=False model.learning_rate=${lr} model.weight_decay=${weight_decay}
+done
+done
+done
