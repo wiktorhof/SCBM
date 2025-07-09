@@ -55,7 +55,7 @@ def generate_training_dataloader_pscbm(
 def pretrain_one_epoch_pscbm(
     train_loader, model, optimizer, metrics, epoch, config, loss_fn, device, run):
     """
-    Pretrain the Probabilistic Stochastic Concept Bottleneck Model (PSCBM) for one epoch. This method doesn't use interventions. Instead, the 
+    Pretrain the Post-hoc Stochastic Concept Bottleneck Model (PSCBM) for one epoch. This method doesn't use interventions. Instead, the 
     covariance matrix is trained in a standard way, i.e. the model is trained to predict concepts and target labels. All other elements of the model
     (encoder, concept head, target head) are frozen.
     Args:
@@ -91,23 +91,13 @@ def pretrain_one_epoch_pscbm(
         c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
 
         # Store predictions
-        metrics.update(
-            target_loss,
-            concepts_loss,
-            total_loss,
-            target_true,
-            target_pred_logits,
-            concepts_true,
-            concepts_pred_probs,
-            prec_loss=prec_loss,
-            cov_norm=c_norm,
-        )
+        end = time.perf_counter
     end = time.perf_counter()
     metrics_dict = metrics.compute(config=config)
     if epoch == 0:
         for (k,v) in metrics_dict.items():
             run.define_metric(f"train_cov/{k}", step_metric="epoch")
-            run.define_metric(f"train_cov/epoch_time", step_metric="epoch")
+            run.define_metric(f"train_cov/epoch_time", step_metric="epoch", summary="mean")
     log_dict = {f"train_cov/{k}": v for (k, v) in metrics_dict.items()}
     log_dict.update({"epoch": epoch + 1, "train_cov/epoch_time": end-start})
     
@@ -248,7 +238,7 @@ def train_one_epoch_pscbm(
     if epoch == 0:
         for (k,v) in metrics_dict.items():
             run.define_metric(f"train_cov_int/{k}", step_metric="epoch")
-            run.define_metric(f"train_cov_int/epoch_time", step_metric="epoch")
+            run.define_metric(f"train_cov_int/epoch_time", step_metric="epoch", summary="mean")
     log_dict = {f"train_cov_int/{k}": v for (k, v) in metrics_dict.items()}
     log_dict.update({"epoch": epoch + 1, "train_cov_int/epoch_time": end-time})
     run.log(log_dict)    
@@ -368,7 +358,7 @@ def train_one_epoch_scbm(
     if epoch == 0:
         for i, (k, v) in enumerate(metrics_dict.items()):
             run.define_metric(f"train/{k}", step_metric="epoch")
-            run.define_metric(f"train/epoch_time", step_metric="epoch")
+            run.define_metric(f"train/epoch_time", step_metric="epoch", summary="mean")
     log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
     log_dict.update({"epoch": epoch + 1, "train/epoch_time": end-start})
     run.log(log_dict)
@@ -478,7 +468,7 @@ def train_one_epoch_cbm(
     if epoch == 0:
         for i, (k, v) in enumerate(metrics_dict.items()):
             run.define_metric(f"train/{k}", step_metric="epoch")
-            run.define_metric(f"train/epoch_time", step_metric="epoch")
+            run.define_metric(f"train/epoch_time", step_metric="epoch", summary="mean")
     log_dict = {f"train/{k}": v for (k, v) in metrics_dict.items()}
     log_dict.update({"epoch": epoch + 1, "train/epoch_time": end-start})
     run.log(log_dict)
@@ -688,7 +678,7 @@ def validate_one_epoch_pscbm_pretraining(loader, model, metrics, epoch, config, 
         if epoch == 0:
             for (k,v) in metrics_dict.items():
                 run.define_metric(f"validation_cov/{k}", step_metric="epoch")
-                run.define_metric(f"validation_cov/epoch_time", step_metric="epoch")
+                run.define_metric(f"validation_cov/epoch_time", step_metric="epoch", summary="mean")
         log_dict = {f"validation_cov/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch, "validation_cov/epoch_time": end-start})
         run.log(log_dict)
@@ -697,7 +687,7 @@ def validate_one_epoch_pscbm_pretraining(loader, model, metrics, epoch, config, 
         # if epoch == 0:
         for (k,v) in metrics_dict.items():
             run.define_metric(f"test_cov/{k}", step_metric="epoch")
-            run.define_metric(f"test_cov/epoch_time", step_metric="epoch")
+            run.define_metric(f"test_cov/epoch_time", step_metric="epoch", summary="mean")
         log_dict = {f"test_cov/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch, "test_cov/epoch_time": end-time})
         run.log(log_dict)
@@ -780,7 +770,7 @@ def validate_one_epoch_pscbm(
             if epoch == 0:
                 for (k,v) in metrics_dict.items():
                     run.define_metric(f"validation_cov_int/{k}", step_metric="epoch")
-                    run.define_metric(f"validation_cov_int/epoch_time", step_metric="epoch")
+                    run.define_metric(f"validation_cov_int/epoch_time", step_metric="epoch", summary="mean")
             log_dict = {f"validation_cov_int/{k}": v for (k, v) in metrics_dict.items()}
             log_dict.update({"epoch": epoch, "validation_cov_int/epoch_time": end-start})
             run.log(log_dict)
@@ -789,7 +779,7 @@ def validate_one_epoch_pscbm(
             if epoch == 0:
                 for (k,v) in metrics_dict.items():
                     run.define_metric(f"test_cov_int/{k}", step_metric="epoch")
-                    run.define_metric("test_cov_int/epoch_time", step_metric="epoch")
+                    run.define_metric("test_cov_int/epoch_time", step_metric="epoch", summary="mean")
             log_dict = {f"test_cov_int/{k}": v for (k, v) in metrics_dict.items()}
             log_dict.update({"epoch": epoch, "test_cov_int/epoch_time": end-start})
             run.log(log_dict)
@@ -906,7 +896,7 @@ def validate_one_epoch_scbm(
         if epoch == 0:
             for (k,v) in metrics_dict.items():
                 run.define_metric(f"validation/{k}", step_metric="epoch")
-                run.define_metric(f"validation/epoch_time", step_metric="epoch")
+                run.define_metric(f"validation/epoch_time", step_metric="epoch", summary="mean")
         log_dict = {f"validation/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch, "validation/epoch_time": end-start})
         run.log(log_dict)
@@ -915,7 +905,7 @@ def validate_one_epoch_scbm(
         if epoch == 0:
             for (k,v) in metrics_dict.items():
                 run.define_metric(f"test/{k}", step_metric="epoch")
-                run.define_metric(f"test/epoch_time", step_metric="epoch")
+                run.define_metric(f"test/epoch_time", step_metric="epoch", summary="mean")
         log_dict = {f"test/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch, "test/epoch_time": end-start})
         run.log(log_dict)
@@ -1012,7 +1002,7 @@ def validate_one_epoch_cbm(
         if epoch == 0:
             for (k, v) in metrics_dict.items():
                 run.define_metric(f"validation/{k}", step_metric="epoch")
-                run.define_metric(f"validation/epoch_time", step_metric="epoch")
+                run.define_metric(f"validation/epoch_time", step_metric="epoch", summary="mean")
         log_dict = {f"validation/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch, "validation/epoch_time": end-start})
         run.log(log_dict)
@@ -1021,7 +1011,7 @@ def validate_one_epoch_cbm(
         if epoch == 0:
             for (k, v) in metrics_dict.items():
                 run.define_metric(f"test/{k}", step_metric="epoch")
-                run.define_metric(f"test/epoch_time", step_metric="epoch")
+                run.define_metric(f"test/epoch_time", step_metric="epoch", summary="mean")
         log_dict = {f"test/{k}": v for (k, v) in metrics_dict.items()}
         log_dict.update({"epoch": epoch, "test/epoch_time": end-start})
         run.log(log_dict)
