@@ -89,9 +89,19 @@ def pretrain_one_epoch_pscbm(
                 print(f"train_cov/{name}_gradient_norm: {p_norm}")
         optimizer.step()
         c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
-
+        
         # Store predictions
-        end = time.perf_counter
+        metrics.update(
+                target_loss,
+                concepts_loss,
+                total_loss,
+                target_true,
+                target_pred_logits,
+                concepts_true,
+                concepts_pred_probs,
+                prec_loss=prec_loss,
+                cov_norm=c_norm,
+            )
     end = time.perf_counter()
     metrics_dict = metrics.compute(config=config)
     if epoch == 0:
@@ -225,7 +235,7 @@ def train_one_epoch_pscbm(
             if p.grad is not None:
                 p_norm = p.grad.data.norm(2)
                 run.log({f"train_cov_int/{name}_gradient_norm": p_norm})
-                print(f"train_cov_int/{name}_gradient_norm: {p_norm}")
+                #print(f"train_cov_int/{name}_gradient_norm: {p_norm}")
 
 
         optimizer.step()
@@ -240,7 +250,7 @@ def train_one_epoch_pscbm(
             run.define_metric(f"train_cov_int/{k}", step_metric="epoch")
             run.define_metric(f"train_cov_int/epoch_time", step_metric="epoch", summary="mean")
     log_dict = {f"train_cov_int/{k}": v for (k, v) in metrics_dict.items()}
-    log_dict.update({"epoch": epoch + 1, "train_cov_int/epoch_time": end-time})
+    log_dict.update({"epoch": epoch + 1, "train_cov_int/epoch_time": end_time})
     run.log(log_dict)    
 
     prints = f"Epoch {epoch + 1}, Train     : "
