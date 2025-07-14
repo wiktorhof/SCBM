@@ -86,7 +86,7 @@ def pretrain_one_epoch_pscbm(
             if p.grad is not None:
                 p_norm = p.grad.data.norm(2)
                 run.log({f"train_cov/{name}_gradient_norm": p_norm})
-                print(f"train_cov/{name}_gradient_norm: {p_norm}")
+                # print(f"train_cov/{name}_gradient_norm: {p_norm}")
         optimizer.step()
         c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
         
@@ -1092,7 +1092,7 @@ def create_lr_scheduler(config, optimizer, interventions=False):
 		epochs = config.model.i_epochs
 	else:
 		epochs = config.model.p_epochs
-	scheduler_type = config.model.get("lr_scheduler" "step")
+	scheduler_type = config.model.get("lr_scheduler", "step")
 	if scheduler_type == "step":
 		lr_scheduler = torch.optim.lr_scheduler.StepLR(
 			optimizer,
