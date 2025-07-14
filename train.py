@@ -223,7 +223,6 @@ def train(config):
                     gamma=1 / config.model.lr_divisor,
                 )
                 print("Using the following optimizer:", c_optimizer.__class__.__name__,
-                      "with the following parameters:", c_optimizer.param_groups[0],
                       "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
                 for epoch in range(p_epochs):
                     # Validate the model periodically
@@ -264,7 +263,6 @@ def train(config):
                 )
                 
                 print("Using the following optimizer:", c_optimizer.__class__.__name__,
-                      "with the following parameters:", c_optimizer.param_groups[0],
                       "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
                 
                 for epoch in range(c_epochs): # pylint: disable
@@ -307,7 +305,6 @@ def train(config):
             )
             
             print("Using the following optimizer:", optimizer.__class__.__name__,
-                    "with the following parameters:", optimizer.param_groups[0],
                     "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
 
             # If sequential & independent training: second stage is training of target predictor
@@ -427,7 +424,6 @@ def train(config):
                 # )
                 print("TRAINING THE PSCBM COVARIANCE ON INFERENCE")
                 print("Using the following optimizer:", optimizer.__class__.__name__,
-                      "with the following parameters:", optimizer.param_groups[0],
                       "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
                 start_time = time.perf_counter()
                 for epoch in range(config.model.p_epochs):
@@ -458,6 +454,10 @@ def train(config):
 
             # Train the model with interventions
             if config.model.get("train_interventions", False):
+                print("TRAINING THE PSCBM COVARIANCE ON INTERVENTIONS")
+                print("Using the following optimizer:", optimizer.__class__.__name__,
+                      "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
+
                 # Define wandb metrics
                 run.define_metric("train_cov_int/lr", step_metric="epoch")
                 # Freeze the CBM & report trainable parameters
@@ -472,11 +472,6 @@ def train(config):
 
                 optimizer = create_optimizer(config.model, model)
                 lr_scheduler = create_lr_scheduler(config, optimizer, interventions=True)
-                print("TRAINING THE PSCBM COVARIANCE ON INTERVENTIONS")
-                print("Using the following optimizer:", optimizer.__class__.__name__,
-                      "with the following parameters:", optimizer.param_groups[0],
-                      "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
-
 
                 start_time = time.perf_counter()
                 for epoch in range(config.model.i_epochs):

@@ -166,17 +166,11 @@ def train_one_epoch_pscbm(
 ):
         if config.model.cov_type == "global":
             batch_features, target_true, concepts_true, concepts_pred_probs = (item.to(device) for item in batch)
-            # timestamp1 = perf_counter()
             concepts_sampled_probs, _, _, concepts_cov = model(batch_features, epoch, cov_only=(not model.use_covariance_in_forward))
-            # timestamp2 = perf_counter()
-            # model_time += (timestamp2-timestamp1)
         else: # amortized
             batch_features, target_true, concepts_true, concepts_pred_probs, intermediate = (item.to(device) for item in batch)
-            # timestamp1 = perf_counter()
             concepts_sampled_probs, _, _, concepts_cov = model(batch_features, epoch, cov_only=(not model.use_covariance_in_forward), intermediate=intermediate)
-            # timestamp2 = perf_counter()
-            # model_time += (timestamp2-timestamp1)
-        
+            
         # Naming might be misleading here. What is meant: if the model used covariance
         # to predict concept mean, then it is different from the one present in the training
         # Dataset and should be used instead. Otherwise, the one from the pretrained dataset
@@ -199,8 +193,6 @@ def train_one_epoch_pscbm(
         # (masks.sum(dim=2)==num_ones_per_mask).all()
         # )
         masks = masks.to(device)
-        # timestamp3 = perf_counter()
-        # mask_time += (timestamp3-timestamp2)
         concepts_pred_mu = torch.logit(concepts_pred_probs, eps=1e-6)
         accumulated_loss = 0
         for concepts_mask in masks:
@@ -241,14 +233,12 @@ def train_one_epoch_pscbm(
             if p.grad is not None:
                 p_norm = p.grad.data.norm(2)
                 run.log({f"train_cov_int/{name}_gradient_norm": p_norm})
-                #print(f"train_cov_int/{name}_gradient_norm: {p_norm}")
+                # print(f"train_cov_int/{name}_gradient_norm: {p_norm}")
 
 
         optimizer.step()
         optimizer.zero_grad()
-        # timestamp4 = perf_counter()
-        # interventions_time += (timestamp4-timestamp3)
-    end = time.perf_counter
+    end = time.perf_counter()
     # Calculate and log metrics
     metrics_dict = metrics.compute(config=config)
     if epoch == 0:
@@ -263,17 +253,7 @@ def train_one_epoch_pscbm(
     for key, value in metrics_dict.items():
         prints += f"{key}: {value:.3f} "
     print(prints)
-    metrics.reset()
-    # print(f"""Time spend on specific activities in the training loop:
-    # model evaluation: {model_time:.2f}s
-    # masks creation: {mask_time:.2f}s
-    # interventions: {interventions_time:.2f}s
-    # """)   
-    # run.log({
-    #     "train/model_evaluation_time": model_time,
-    #     "train/masks_creation_time": mask_time,
-    #     "train/interventions_time": interventions_time,
-    #     })           
+    metrics.reset()   
     return metrics_dict['total_loss']
 
 def train_one_epoch_scbm(
