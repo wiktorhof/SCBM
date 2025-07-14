@@ -308,6 +308,10 @@ class PSCBM(nn.Module):
         This flow is a bit complicated but the advantage is that it allows various use cases like returning only the covariance matrix, using the covariance matrix to sample
         concepts or passing the intermediate encoder representation in order to speed up computations.
         """
+        # If the argument hasn't been specified in the function call, use the model's default
+        # which depends on the configuration file.
+        if use_covariance is None:
+            use_covariance = self.use_covariance_in_forward
         # Step 1
         concepts_cov, intermediate = self._compute_covariance(x, intermediate)
         # Step 2
@@ -315,10 +319,6 @@ class PSCBM(nn.Module):
             concepts_pred_probs, target_pred_logits, concepts = None, None, None
             return_intermediate = False # Just in case someone passed incorrect arguments
         # Step 3
-        # If the argument hasn't been specified in the function call, use the model's default
-        # which depends on the configuration file.
-        if use_covariance is None:
-            use_covariance = self.use_covariance_in_forward
         else:
             if use_covariance:
                 intermediate = self.encoder(x) if intermediate is None else intermediate
