@@ -30,13 +30,13 @@ def generate_training_dataloader_pscbm(
             ):
             batch_features, target_true, concepts_true = batch["features"].to(device), batch["labels"].to(device), batch["concepts"].to(device)
             if config.model.cov_type == "global" and not config.model.get("pretrain_cov", False):
-                concepts_pred_probs, _, _, _ = model(batch_features, epoch)
+                concepts_pred_probs, _, _, _ = model(batch_features, epoch, use_covariance=False)
                 training_dataset.append(
                     [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), ]
                     )
             # If
             elif config.model.cov_type == "amortized":
-                concepts_pred_probs, _, _, _, intermediate = model(batch_features, epoch, return_intermediate=True)
+                concepts_pred_probs, _, _, _, intermediate = model(batch_features, epoch, return_intermediate=True, use_covariance=False)
                 training_dataset.append(
                     [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), intermediate.cpu(), ]
                     )
@@ -167,16 +167,22 @@ def train_one_epoch_pscbm(
         if config.model.cov_type == "global":
             batch_features, target_true, concepts_true, concepts_pred_probs = (item.to(device) for item in batch)
             # timestamp1 = perf_counter()
-            _, _, _, concepts_cov = model(batch_features, epoch, cov_only=True)
+            concepts_sampled_probs, _, _, concepts_cov = model(batch_features, epoch, cov_only=(not model.use_covariance_in_forward))
             # timestamp2 = perf_counter()
             # model_time += (timestamp2-timestamp1)
         else: # amortized
             batch_features, target_true, concepts_true, concepts_pred_probs, intermediate = (item.to(device) for item in batch)
             # timestamp1 = perf_counter()
-            _, _, _, concepts_cov = model(batch_features, epoch, cov_only=True, intermediate=intermediate)
+            concepts_sampled_probs, _, _, concepts_cov = model(batch_features, epoch, cov_only=(not model.use_covariance_in_forward), intermediate=intermediate)
             # timestamp2 = perf_counter()
             # model_time += (timestamp2-timestamp1)
-
+        
+        # Naming might be misleading here. What is meant: if the model used covariance
+        # to predict concept mean, then it is different from the one present in the training
+        # Dataset and should be used instead. Otherwise, the one from the pretrained dataset
+        # is retained.
+        if concepts_sampled_probs is None:
+            concepts_pred_probs = concepts_sampled_probs
         batch_size = concepts_true.shape[0]
         scores = torch.rand(num_masks, batch_size, num_concepts)
         masks = torch.zeros_like(scores, dtype=torch.int8) #num_masks, batch_size, num_concepts
@@ -582,9 +588,20 @@ def create_validation_dataloader_pscbm(
             # )
             masks_dataset.append(masks)
             if config.model.cov_type == "global" and not config.model.pretrain_covariance:
-                concepts_pred_probs, _, _, _ = model(batch_features, epoch=0, validation=True)
+                concepts_pred_probs, _, _, _ = model(
+                    batch_features,
+                    epoch=0, 
+                    validation=True, 
+                    use_covariance=False
+                    )
             elif config.model.cov_type == "amortized" or config.model.pretrain_covariance:
-                concepts_pred_probs, _, _, _, intermediate = model(batch_features, epoch=0, validation=True, return_intermediate=True)
+                concepts_pred_probs, _, _, _, intermediate = model(
+                    batch_features, 
+                    epoch=0, 
+                    validation=True, 
+                    return_intermediate=True, 
+                    use_covariance=False,
+                    )
             else:
                 raise ValueError()
             concepts_pred_mu = torch.logit(concepts_pred_probs,eps=1e-6)
@@ -663,10 +680,14 @@ def validate_one_epoch_pscbm_pretraining(loader, model, metrics, epoch, config, 
             (
                 concepts_pred_mu, concepts_true, target_true, batch_features, intermediate, masks
             ) = (item.to(device) for item in batch)
-            concepts_pred_probs, target_pred_logits, concepts, concepts_cov = model(batch_features, epoch, intermediate=intermediate, use_covariance=True)
+            concepts_pred_probs, target_pred_logits, concepts, concepts_cov = model(
+                batch_features, epoch, intermediate=intermediate, use_covariance=True
+                )
         else: #For test we don't generate a precomputed dataset as it would only be used once in the very end anyway.
             batch_features, concepts_true, target_true = batch["features"].to(device), batch["concepts"].to(device), batch["labels"].to(device)
-            concepts_pred_probs, target_pred_logits, concepts, concepts_cov = model(batch_features, epoch, intermediate=None, use_covariance=True)
+            concepts_pred_probs, target_pred_logits, concepts, concepts_cov = model(
+                batch_features, epoch, intermediate=None, use_covariance=True
+                )
         target_loss, concepts_loss, prec_loss, total_loss = loss_fn(concepts, concepts_true, target_pred_logits, target_true, concepts_cov, cov_not_triang=True)
         c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
 
@@ -746,9 +767,16 @@ def validate_one_epoch_pscbm(
             masks = torch.swapdims(masks, 0, 1) # masks.size: (num_masks,batch_size,num_concepts)
             # Concepts mu is the same before and after covariance training, but concepts_cov differs.
             if config.model.cov_type == "global":
-                _, _, _, concepts_cov = model(batch_features, epoch=epoch, cov_only=True)
+                cov_predicted_concepts, _, _, concepts_cov = model(
+                    batch_features, epoch=epoch, cov_only=not model.use_covariance_in_forward,
+                    )
             else: # amortized
-                _, _, _, concepts_cov = model(batch_features, epoch=epoch, cov_only=True, intermediate=intermediate)
+                cov_predicted_concepts, _, _, concepts_cov = model(
+                    batch_features, epoch=epoch, cov_only=not model.use_covariance_in_forward, 
+                    intermediate=intermediate
+                    )
+            if cov_predicted_concepts is not None:
+                concepts_pred_mu = cov_predicted_concepts
             for concepts_mask in masks:
                 concepts_mu_interv, concepts_cov_interv, c_mcmc_probs, c_mcmc_logits = strategy.compute_intervention(
                     concepts_pred_mu, concepts_cov, concepts_true, concepts_mask
