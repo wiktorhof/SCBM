@@ -161,6 +161,12 @@ class PSCBM(nn.Module):
         else:
             self.num_epochs = config_model.t_epochs
         self.cov_type = config_model.cov_type
+        # Whether to use covariance matrix for calculating the forward pass (True)
+        # or make it the same way as a regular CBM (False)
+        # If not specified in config, defaults to True, because we want to maximally
+        # Explore and exploit the benefits of using covariance (e.g. whether it
+        # improves calibration of concept predictions)
+        self.use_covariance_in_forward = config_model.get("use_covariance_in_forward", True)
 
         #Architecture is exported to a sub-class:
         self.CBM = CBM(config)
@@ -239,11 +245,18 @@ class PSCBM(nn.Module):
 
 
     def _compute_covariance(self, x, intermediate):
+        """
+        Compute the model's covariance matrix. In case of "amortized" covariance, 
+        it is calculated from the features. These features are then returned too,
+        in order to save computations in later steps of the forward pass.
+        """
         
         if self.cov_type.startswith("empirical") or self.cov_type == "identity":
             concepts_cov = self.covariance.repeat(x.shape[0],1)
+            intermediate = None
         elif self.cov_type == "global":
             c_sigma_triang = self.sigma_concepts.repeat(x.shape[0], 1)
+            intermediate = None
         elif self.cov_type == "amortized":
             # This condition is only triggered if cov_only=True and intermediate=None
             if intermediate is None:
@@ -266,9 +279,9 @@ class PSCBM(nn.Module):
             )
             concepts_cov = c_triang_cov @ c_triang_cov.transpose(dim0=-2, dim1=-1)
 
-        return concepts_cov
+        return concepts_cov, intermediate
 
-    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False, return_intermediate=False, use_covariance=False):
+    def forward(self, x, epoch, c_true=None, validation=False, return_full=True, intermediate=None, cov_only=False, return_intermediate=False, use_covariance=None):
         """
         args:
         intermediate: if we are only interested in calculating the covariance, we can pass the encoder's features s.t. they don't have to be reevaluated.
@@ -296,12 +309,16 @@ class PSCBM(nn.Module):
         concepts or passing the intermediate encoder representation in order to speed up computations.
         """
         # Step 1
-        concepts_cov = self._compute_covariance(x, intermediate)
+        concepts_cov, intermediate = self._compute_covariance(x, intermediate)
         # Step 2
         if cov_only:
             concepts_pred_probs, target_pred_logits, concepts = None, None, None
             return_intermediate = False # Just in case someone passed incorrect arguments
         # Step 3
+        # If the argument hasn't been specified in the function call, use the model's default
+        # which depends on the configuration file.
+        if use_covariance is None:
+            use_covariance = self.use_covariance_in_forward
         else:
             if use_covariance:
                 intermediate = self.encoder(x) if intermediate is None else intermediate
