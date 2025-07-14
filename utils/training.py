@@ -250,7 +250,7 @@ def train_one_epoch_pscbm(
             run.define_metric(f"train_cov_int/{k}", step_metric="epoch")
             run.define_metric(f"train_cov_int/epoch_time", step_metric="epoch", summary="mean")
     log_dict = {f"train_cov_int/{k}": v for (k, v) in metrics_dict.items()}
-    log_dict.update({"epoch": epoch + 1, "train_cov_int/epoch_time": end_time})
+    log_dict.update({"epoch": epoch + 1, "train_cov_int/epoch_time": end-start})
     run.log(log_dict)    
 
     prints = f"Epoch {epoch + 1}, Train     : "
@@ -699,7 +699,7 @@ def validate_one_epoch_pscbm_pretraining(loader, model, metrics, epoch, config, 
             run.define_metric(f"test_cov/{k}", step_metric="epoch")
             run.define_metric(f"test_cov/epoch_time", step_metric="epoch", summary="mean")
         log_dict = {f"test_cov/{k}": v for (k, v) in metrics_dict.items()}
-        log_dict.update({"epoch": epoch, "test_cov/epoch_time": end-time})
+        log_dict.update({"epoch": epoch, "test_cov/epoch_time": end-start})
         run.log(log_dict)
         prints = f"Test: "
     for key, value in metrics_dict.items():
