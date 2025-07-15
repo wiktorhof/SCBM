@@ -55,6 +55,7 @@ done
 cov='empirical_true'
 # I limit data ratios to 2 extremes due to resource constraints.
 for data_ratio in 1 0.05
+do
 for i in "${!CBMs[@]}"
 do
         CBM=${CBMs[$i]}
@@ -71,5 +72,5 @@ do
         'model.additional_tags=[empirical,final,partial_data]'
 
 done
-
+done
 
