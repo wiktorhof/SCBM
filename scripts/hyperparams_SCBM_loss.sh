@@ -32,11 +32,11 @@ echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
 for lr_scheduler in 'step' 'cosine'
 do
-    for lr in 0.001 0.0001 0.00001
+    for lr in 0.001 
     do
-        for weight_decay in 0 0.01
+        for weight_decay in 0 
         do
-            for i in 11 12 13 14
+            for i in 14
             do
                     tag=${model}_${cov}_inference_${lr_scheduler}_${lr}_decay_${weight_decay}
                     sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
