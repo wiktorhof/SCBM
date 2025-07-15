@@ -38,7 +38,7 @@ do
     do
         for weight_decay in 0 0.01
         do
-            for i in 11 12 13 14
+            for i in 11
             do
                     tag=${model}_${cov}_inference_${lr_scheduler}_${lr}_decay_${weight_decay}
                     sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \

@@ -36,16 +36,17 @@ echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
 
 CBMs=(
-    'CBM_1'
-    'CBM_2'
-    'CBM_3'
-    'CBM_1'
-    'CBM_2'
-    'CBM_3'
-    'CBM_1'
-    'CBM_2'
-    'CBM_3'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
 )
+
 
 seeds=( 101 202 303 404 505 606 707 808 909 )
 
