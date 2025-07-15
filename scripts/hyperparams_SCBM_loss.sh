@@ -30,13 +30,15 @@ save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
+for cov in 'amortized' 'global'
+do
 for lr_scheduler in 'step' 'cosine'
 do
     for lr in 0.001 
     do
         for weight_decay in 0 
         do
-            for i in 14
+            for i in 11
             do
                     tag=${model}_${cov}_inference_${lr_scheduler}_${lr}_decay_${weight_decay}
                     sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
@@ -54,4 +56,5 @@ do
             done
         done
     done
+done
 done
