@@ -30,6 +30,8 @@ save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
+for cov in 'amortized' 'global'
+do
 for lr_scheduler in 'step' 'cosine'
 do
     for lr in 0.001 0.0001 0.00001
@@ -54,4 +56,5 @@ do
             done
         done
     done
+done
 done
