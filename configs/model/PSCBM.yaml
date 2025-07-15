@@ -11,6 +11,7 @@ pretrain_covariance: True
 p_epochs: 200
 model: 'pscbm' # Model's name
 tag: 'pscbm' # Model's tag for wandb logging
+additional_tags: [] # Additional tags for wandb logging
 concept_learning: 'hard' # Characteristics of concept bottleneck, either hard {0,1}, or soft logits ['hard', 'soft', 'cem']
 # I will then also want to use CEM.
 train_interventions: True
@@ -45,6 +46,7 @@ mask_density_val: [0.01,0.25] # I variate mask density used for training but for
 # --------------------------
 #         Policy
 # --------------------------
+calculate_interventions: True # Whether to calculate interventions after training
 inter_policy: 'random,prob_unc' # Comma-separated intervention policies to determine which concept to intervene. Combinable options: ['random','prob_unc']
 inter_strategy: 'hard,simple_perc,conf_interval_optimal,emp_perc' 
 # Comma-separated intervention strategies to determine how to perform interventions. Combinable options: ['simple_perc', 'emp_perc', 'conf_interval_optimal']

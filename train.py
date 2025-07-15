@@ -90,13 +90,18 @@ def train(config):
         wandb.login(key=os.environ["WANDB_API_KEY"], host=config.logging.host)
         print ("Successfully logged in!")
     print("Cache dir:", os.environ["WANDB_CACHE_DIR"])
+    tags = [config.model.tag, config.model.concept_learning, 
+            config.model.get("cov_type"), config.model.training_mode, 
+            config.data.dataset,]
+    additional_tags = config.model.get("additional_tags", [])
+    tags.extend(additional_tags)
     with wandb.init(
         project=config.logging.project,
         reinit="create_new",
         entity=config.logging.entity,
         config=OmegaConf.to_container(config, resolve=True),
         mode=config.logging.mode,
-        tags=[config.model.tag, config.model.concept_learning, config.model.get("cov_type"), config.model.training_mode, config.data.dataset],
+        tags=tags,
     ) as run:
         print ("Run initialized")
         if config.logging.mode in ["online", "disabled"]:
@@ -261,7 +266,6 @@ def train(config):
                     step_size=config.model.decrease_every,
                     gamma=1 / config.model.lr_divisor,
                 )
-                
                 print("Using the following optimizer:", c_optimizer.__class__.__name__,
                       "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
                 
@@ -303,7 +307,6 @@ def train(config):
                 step_size=config.model.decrease_every,
                 gamma=1 / config.model.lr_divisor,
             )
-            
             print("Using the following optimizer:", optimizer.__class__.__name__,
                     "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
 
@@ -416,15 +419,10 @@ def train(config):
                 # Create optimizer and lr_scheduler
                 optimizer = create_optimizer(config.model, model)
                 lr_scheduler = create_lr_scheduler(config, optimizer, interventions=False)
-                # TODO This I could do as an ablation for the appendix. For the main experiments stick to the same
-                # algorithm as used in the main models
-                # lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                #     optimizer,
-                #     model.p_epochs
-                # )
-                print("TRAINING THE PSCBM COVARIANCE ON INFERENCE")
                 print("Using the following optimizer:", optimizer.__class__.__name__,
                       "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
+                
+                print("TRAINING THE PSCBM COVARIANCE ON INFERENCE")
                 start_time = time.perf_counter()
                 for epoch in range(config.model.p_epochs):
                     # Training
@@ -455,9 +453,7 @@ def train(config):
             # Train the model with interventions
             if config.model.get("train_interventions", False):
                 print("TRAINING THE PSCBM COVARIANCE ON INTERVENTIONS")
-                print("Using the following optimizer:", optimizer.__class__.__name__,
-                      "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
-
+                
                 # Define wandb metrics
                 run.define_metric("train_cov_int/lr", step_metric="epoch")
                 # Freeze the CBM & report trainable parameters
@@ -472,6 +468,8 @@ def train(config):
 
                 optimizer = create_optimizer(config.model, model)
                 lr_scheduler = create_lr_scheduler(config, optimizer, interventions=True)
+                print("Using the following optimizer:", optimizer.__class__.__name__,
+                      "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
 
                 start_time = time.perf_counter()
                 for epoch in range(config.model.i_epochs):
@@ -527,11 +525,14 @@ def train(config):
                     print(f"\nTRAINING ON INTERVENTIONS FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, 'model_trained_int.pth')}", flush=True)
                 else:
                     print("\nTRAINING ON INTERVENTIONS FINISHED", flush=True)
-            # Intervention curves
-        print("\nPERFORMING INTERVENTIONS ON THE FINAL TRAINED MODEL:\n")
-        intervene(
-            train_loader, test_loader, model, metrics, t_epochs, config, loss_fn, device, run
-        )
+        # Intervention curves.
+        # When tuning hyperparameters for SCBM-loss PSCBM, I want to be able not to
+        # calculate these intervention curves in order to save computaions.
+        if config.model.get("calculate_interventions", True):
+            print("\nPERFORMING INTERVENTIONS ON THE FINAL TRAINED MODEL:\n")
+            intervene(
+                train_loader, test_loader, model, metrics, t_epochs, config, loss_fn, device, run
+            )
     return None
 
 

@@ -1,2 +1,2 @@
 data_path: '../datasets/'  # Directory of data
-num_interventions: 40
+num_interventions: 200
