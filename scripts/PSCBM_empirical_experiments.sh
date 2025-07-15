@@ -35,17 +35,17 @@ echo Submitting job
 # 3 hard CBMs trained with different seeds. Each one is evaluated 3 times.
 CBMs=(
     '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+    # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
+    # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+    # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
+    # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
+    # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+    # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
+    # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
+    # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
 )
 
-seeds=( 101 202 303 404 505 606 707 808 909 )
+seeds=( 101 ) # 202 303 404 505 606 707 808 909 )
 
 for i in "${!CBMs[@]}"
 do
@@ -53,7 +53,8 @@ do
 done
 
 cov='empirical_true'
-for data_ratio in 1 0.5 0.2 0.1 0.05
+# I limit data ratios to 2 extremes due to resource constraints.
+for data_ratio in 1 0.05
 for i in "${!CBMs[@]}"
 do
         CBM=${CBMs[$i]}
