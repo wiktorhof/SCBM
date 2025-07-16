@@ -29,14 +29,14 @@ from utils.training import (
     create_lr_scheduler,
     train_one_epoch_cbm,
     train_one_epoch_scbm,
-    pretrain_one_epoch_pscbm,
-    train_one_epoch_pscbm,
+    train_one_epoch_pscbm_with_loss,
+    train_one_epoch_pscbm_with_interventions,
     validate_one_epoch_cbm,
     validate_one_epoch_scbm,
-    generate_training_dataloader_pscbm,
-    create_validation_dataloader_pscbm,
-    validate_one_epoch_pscbm_pretraining,
-    validate_one_epoch_pscbm,
+    generate_pscbm_training_dataloader,
+    create_pscbm_validation_dataloader,
+    validate_one_epoch_pscbm_with_loss,
+    validate_one_epoch_pscbm_with_interventions,
     Custom_Metrics,
 )
 from utils.utils import reset_random_seeds, save_trainable_params
@@ -179,8 +179,8 @@ def train(config):
             train_one_epoch = train_one_epoch_scbm
             intervene = intervene_scbm
         elif config.model.model == "pscbm":
-            validate_one_epoch = validate_one_epoch_pscbm
-            train_one_epoch = train_one_epoch_pscbm
+            validate_one_epoch = validate_one_epoch_pscbm_with_interventions
+            train_one_epoch = train_one_epoch_pscbm_with_interventions
             intervene = intervene_pscbm
 
         # if config.model.model == "pscbm" and config.model.load_weights and config.model.cov_type in ("empirical_true", "empirical_predicted"):
@@ -364,15 +364,13 @@ def train(config):
             run.define_metric("epoch")
             
             intervention_strategy = define_strategy(
-                "simple_perc", train_loader, model, device, config
-            ) if model.concept_learning == 'soft' else define_strategy(
-                "simple_perc", train_loader, model, device, config
-            )
+            config.model.get("training_strategy", "simple_perc"), train_loader, model, device, config
+        )
             print("Generating a dataset for interventions validation...")
             start_time = time.perf_counter()
             # Fix seed before validation dataloader's generation s.t. the validation dataset remains the same for all model evaluations (even though it will still necessarily differ for different underlying CBMs)
             reset_random_seeds(42)
-            interventions_validation_dataloader = create_validation_dataloader_pscbm(
+            interventions_validation_dataloader = create_pscbm_validation_dataloader(
                 val_loader,
                 model,
                 metrics,
@@ -389,7 +387,7 @@ def train(config):
             best_validation_loss = torch.inf
             print(f"Validation dataset has been generated in {(end_time - start_time):.2f} seconds.")
             generation_start_time = time.perf_counter()
-            interventions_training_dataloader = generate_training_dataloader_pscbm(train_loader, model, 0, config, device, run)
+            interventions_training_dataloader = generate_pscbm_training_dataloader(train_loader, model, 0, config, device, run)
             generation_end_time = time.perf_counter()
             print(f"Training dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
             
@@ -427,18 +425,18 @@ def train(config):
                 for epoch in range(config.model.p_epochs):
                     # Training
                     run.log({"train_cov/lr": lr_scheduler.get_last_lr()[0]})
-                    pretrain_one_epoch_pscbm(interventions_training_dataloader, model, optimizer, metrics, epoch, config, loss_fn, device, run)
+                    train_one_epoch_pscbm_with_loss(interventions_training_dataloader, model, optimizer, metrics, epoch, config, loss_fn, device, run)
                     lr_scheduler.step()
                     # Validation
                     if epoch % config.model.validate_per_epoch == 0:
-                        validation_loss = validate_one_epoch_pscbm_pretraining(interventions_validation_dataloader, model, metrics, epoch, config, loss_fn, device, run)
+                        validation_loss = validate_one_epoch_pscbm_with_loss(interventions_validation_dataloader, model, metrics, epoch, config, loss_fn, device, run)
                         if validation_loss < best_validation_loss:
                             save_trainable_params(model, join (experiment_path, "model_covariance_best.pth"))
                             best_validation_loss = validation_loss
                                 
                 end_time = time.perf_counter()
                 print("Evaluating pre-trained covariance on the test set:")
-                validate_one_epoch_pscbm_pretraining(test_loader, model, metrics, config.model.p_epochs, config, loss_fn, device, run, test=True, precomputed_dataset=False)
+                validate_one_epoch_pscbm_with_loss(test_loader, model, metrics, config.model.p_epochs, config, loss_fn, device, run, test=True, precomputed_dataset=False)
                 
                 print(f"Training the covariance for {config.model.p_epochs} with validation every {config.model.validate_per_epoch} epochs took {(end_time-start_time):.2f}s.")
                 if config.save_model:
@@ -492,7 +490,7 @@ def train(config):
                                 train_loader, val_loader, model, metrics, t_epochs, config, loss_fn, device, interventions_run
                             )
                     run.log({"train_cov_int/lr": lr_scheduler.get_last_lr()[0]})
-                    train_one_epoch_pscbm(
+                    train_one_epoch_pscbm_with_interventions(
                         interventions_training_dataloader, 
                         model, 
                         optimizer, 
@@ -511,7 +509,7 @@ def train(config):
                     # Validate the model periodically
                     if epoch % config.model.validate_per_epoch == 0 or epoch < 20: # In the initial phase of training validation seems crucial to me.
                         print(f"\nEVALUATION ON THE VALIDATION SET at epoch {epoch}:\n")
-                        validation_loss = validate_one_epoch_pscbm(
+                        validation_loss = validate_one_epoch_pscbm_with_interventions(
                             interventions_validation_dataloader, model, metrics, epoch, config, intervention_strategy, loss_fn, device, run,
                         )
                         if validation_loss < best_validation_loss:

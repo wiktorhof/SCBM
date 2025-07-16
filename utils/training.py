@@ -19,8 +19,8 @@ from utils.metrics import calc_target_metrics, calc_concept_metrics
 from utils.plotting import compute_and_plot_heatmap
 
 
-def generate_training_dataloader_pscbm(
-    train_loader, model, epoch, config, device, run
+def generate_pscbm_training_dataloader(
+    train_loader, model, epoch, config, device, run=None
 ):
     model.eval()
     training_dataset = []
@@ -52,7 +52,7 @@ def generate_training_dataloader_pscbm(
     training_dataloader = DataLoader(training_dataset, batch_size=config.model.train_batch_size, num_workers=config.workers, shuffle=True, pin_memory=True, drop_last=True)
     return training_dataloader
 
-def pretrain_one_epoch_pscbm(
+def train_one_epoch_pscbm_with_loss(
     train_loader, model, optimizer, metrics, epoch, config, loss_fn, device, run):
     """
     Pretrain the Post-hoc Stochastic Concept Bottleneck Model (PSCBM) for one epoch. This method doesn't use interventions. Instead, the 
@@ -121,7 +121,7 @@ def pretrain_one_epoch_pscbm(
 
     return metrics_dict['total_loss']
 
-def train_one_epoch_pscbm(
+def train_one_epoch_pscbm_with_interventions(
     train_loader, model, optimizer, metrics, epoch, config, 
     intervention_strategy, loss_fn, device, run, num_masks=10, mask_density=0.15, num_ones=None):
     """
@@ -475,7 +475,7 @@ def train_one_epoch_cbm(
     metrics.reset()
     return
 
-def create_validation_dataloader_pscbm(
+def create_pscbm_validation_dataloader(
     dataloader,
     model,
     metrics,
@@ -483,7 +483,7 @@ def create_validation_dataloader_pscbm(
     intervention_strategy,
     loss_fn,
     device,
-    run,
+    run=None,
     concept_names_graph=None,
     num_masks=10, # Number of random concept masks per data point
     mask_density=0.15, # Average ratio of concepts which are known in interventions.
@@ -651,7 +651,7 @@ def create_validation_dataloader_pscbm(
         return intervention_validation_loader
 
 
-def validate_one_epoch_pscbm_pretraining(loader, model, metrics, epoch, config, loss_fn, device, run, test=False, precomputed_dataset=True):
+def validate_one_epoch_pscbm_with_loss(loader, model, metrics, epoch, config, loss_fn, device, run, test=False, precomputed_dataset=True):
     model.eval()
     metrics.reset()
     start_time = time.perf_counter()
@@ -710,7 +710,7 @@ def validate_one_epoch_pscbm_pretraining(loader, model, metrics, epoch, config, 
     metrics.reset()
     return metrics_dict["total_loss"]    
 
-def validate_one_epoch_pscbm(
+def validate_one_epoch_pscbm_with_interventions(
     loader,
     model,
     metrics,
