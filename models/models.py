@@ -252,7 +252,7 @@ class PSCBM(nn.Module):
         """
         
         if self.cov_type.startswith("empirical") or self.cov_type == "identity":
-            concepts_cov = self.covariance.repeat(x.shape[0],1)
+            concepts_cov = self.covariance.expand(x.shape[0], -1, -1)
             intermediate = None
         elif self.cov_type == "global":
             c_sigma_triang = self.sigma_concepts.repeat(x.shape[0], 1)
