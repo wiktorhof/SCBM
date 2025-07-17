@@ -29,19 +29,10 @@ def generate_pscbm_training_dataloader(
             train_loader, desc="Generating dataset for interventions training", position=0, leave=True
             ):
             batch_features, target_true, concepts_true = batch["features"].to(device), batch["labels"].to(device), batch["concepts"].to(device)
-            if config.model.cov_type == "global" and not config.model.get("pretrain_cov", False):
-                concepts_pred_probs, _, _, _ = model(batch_features, epoch, use_covariance=False)
-                training_dataset.append(
-                    [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), ]
-                    )
-            # If
-            elif config.model.cov_type == "amortized":
-                concepts_pred_probs, _, _, _, intermediate = model(batch_features, epoch, return_intermediate=True, use_covariance=False)
-                training_dataset.append(
-                    [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), intermediate.cpu(), ]
-                    )
-            else:
-                raise ValueError(f"Covariance training is only possible in the amortized and global variants. The passed argument is {config.model.cov_type}.")
+            concepts_pred_probs, _, _, _, intermediate = model(batch_features, epoch, return_intermediate=True, use_covariance=False)
+            training_dataset.append(
+                [ batch_features.cpu(), target_true.cpu(), concepts_true.cpu(), concepts_pred_probs.cpu(), intermediate.cpu(), ]
+                )
     training_dataset = [
         torch.cat(
             [sublist[i] for sublist in training_dataset], dim=0
@@ -164,12 +155,8 @@ def train_one_epoch_pscbm_with_interventions(
     for k, batch in enumerate(
     tqdm(train_loader, desc=f"Epoch {epoch + 1}", position=0, leave=True)
 ):
-        if config.model.cov_type == "global":
-            batch_features, target_true, concepts_true, concepts_pred_probs = (item.to(device) for item in batch)
-            concepts_sampled_probs, _, _, concepts_cov = model(batch_features, epoch, cov_only=(not model.use_covariance_in_forward))
-        else: # amortized
-            batch_features, target_true, concepts_true, concepts_pred_probs, intermediate = (item.to(device) for item in batch)
-            concepts_sampled_probs, _, _, concepts_cov = model(batch_features, epoch, cov_only=(not model.use_covariance_in_forward), intermediate=intermediate)
+        batch_features, target_true, concepts_true, concepts_pred_probs, intermediate = (item.to(device) for item in batch)
+        concepts_sampled_probs, _, _, concepts_cov = model(batch_features, epoch, cov_only=(not model.use_covariance_in_forward), intermediate=intermediate)
             
         # Naming might be misleading here. What is meant: if the model used covariance
         # to predict concept mean, then it is different from the one present in the training
@@ -589,33 +576,20 @@ def create_pscbm_validation_dataloader(
             # Behaves in CEM case.
             concepts_mcmc_probs = concepts_pred_probs.unsqueeze(-1)
             # target_loss, concepts_loss, precision_loss, total_loss = loss_fn(concepts_mcmc_probs, concepts_true, target_pred_logits_interv, target_true, concepts_cov, cov_not_triang=True)
-            if config.model.cov_type == "global" and not config.model.pretrain_covariance:
-                intervention_validation_dataset.append(
-                    [
-                        # target_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                        # concepts_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                        # precision_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                        # total_loss.cpu().unsqueeze(0).expand(target_true.shape[0]), 
-                        concepts_pred_mu.cpu(),
-                        concepts_true.cpu(),
-                        target_true.cpu(),
-                        batch_features.cpu(),
-                    ]
-                )
-            else: # amortized
-                intervention_validation_dataset.append(
-                    [
-                        # target_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                        # concepts_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                        # precision_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                        # total_loss.cpu().unsqueeze(0).expand(target_true.shape[0]), 
-                        concepts_pred_mu.cpu(),
-                        concepts_true.cpu(),
-                        target_true.cpu(),
-                        batch_features.cpu(),
-                        intermediate.cpu(),
-                    ]
-                )
+
+            intervention_validation_dataset.append(
+                [
+                    # target_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
+                    # concepts_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
+                    # precision_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
+                    # total_loss.cpu().unsqueeze(0).expand(target_true.shape[0]), 
+                    concepts_pred_mu.cpu(),
+                    concepts_true.cpu(),
+                    target_true.cpu(),
+                    batch_features.cpu(),
+                    intermediate.cpu(),
+                ]
+            )
 
 
         intervention_validation_dataset = [
@@ -732,29 +706,19 @@ def validate_one_epoch_pscbm_with_interventions(
     start_time = time.perf_counter()
     with torch.no_grad():
         for k, batch in enumerate(tqdm(loader, desc=f"Epoch {epoch+1}", position=0, leave=True)):
-            if config.model.cov_type == "global":
-                (
-                    concepts_pred_mu, concepts_true, target_true, batch_features, masks
-                ) = (item.to(device) for item in batch)
-            else: # amortized
-                (
-                    concepts_pred_mu, concepts_true, target_true, batch_features, intermediate, masks
-                ) = (item.to(device) for item in batch)
+            (
+                concepts_pred_mu, concepts_true, target_true, batch_features, intermediate, masks
+            ) = (item.to(device) for item in batch)
             # At this point dimension swapping is necessary and here only. The reason: inside the validation dataset the leading dimension
             # is necessarily the batch dimension.
             # However, since I have multiple masks, I swap these 2 dimensions, because my functions can process a batch datapoints including masks
             # But they are unable to handle multiple masks for a single datapoint.
             masks = torch.swapdims(masks, 0, 1) # masks.size: (num_masks,batch_size,num_concepts)
             # Concepts mu is the same before and after covariance training, but concepts_cov differs.
-            if config.model.cov_type == "global":
-                cov_predicted_concepts, _, _, concepts_cov = model(
-                    batch_features, epoch=epoch, cov_only=not model.use_covariance_in_forward,
-                    )
-            else: # amortized
-                cov_predicted_concepts, _, _, concepts_cov = model(
-                    batch_features, epoch=epoch, cov_only=not model.use_covariance_in_forward, 
-                    intermediate=intermediate
-                    )
+            cov_predicted_concepts, _, _, concepts_cov = model(
+                batch_features, epoch=epoch, cov_only=not model.use_covariance_in_forward, 
+                intermediate=intermediate
+            )
             if cov_predicted_concepts is not None:
                 concepts_pred_mu = cov_predicted_concepts
             for concepts_mask in masks:
