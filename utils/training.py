@@ -554,27 +554,17 @@ def create_pscbm_validation_dataloader(
             # (masks.sum(dim=2)==num_ones).all()
             # )
             masks_dataset.append(masks)
-            if config.model.cov_type == "global" and not config.model.pretrain_covariance:
-                concepts_pred_probs, _, _, _ = model(
-                    batch_features,
-                    epoch=0, 
-                    validation=True, 
-                    use_covariance=False
-                    )
-            elif config.model.cov_type == "amortized" or config.model.pretrain_covariance:
-                concepts_pred_probs, _, _, _, intermediate = model(
-                    batch_features, 
-                    epoch=0, 
-                    validation=True, 
-                    return_intermediate=True, 
-                    use_covariance=False,
-                    )
-            else:
-                raise ValueError()
+            concepts_pred_probs, _, _, _, intermediate = model(
+                batch_features, 
+                epoch=0, 
+                validation=True, 
+                return_intermediate=True, 
+                use_covariance=False,
+                )
             concepts_pred_mu = torch.logit(concepts_pred_probs,eps=1e-6)
             # If the underlying CBM is hard, it returns a tensor of concept samples. In soft case it doesn't, so we just use concepts_pred_probs. I am not sure, how it
             # Behaves in CEM case.
-            concepts_mcmc_probs = concepts_pred_probs.unsqueeze(-1)
+            # concepts_mcmc_probs = concepts_pred_probs.unsqueeze(-1)
             # target_loss, concepts_loss, precision_loss, total_loss = loss_fn(concepts_mcmc_probs, concepts_true, target_pred_logits_interv, target_true, concepts_cov, cov_not_triang=True)
 
             intervention_validation_dataset.append(
