@@ -523,6 +523,9 @@ def train(config):
                     print(f"\nTRAINING ON INTERVENTIONS FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, 'model_trained_int.pth')}", flush=True)
                 else:
                     print("\nTRAINING ON INTERVENTIONS FINISHED", flush=True)
+                print("Evaluating inference performance on test set for covariance trained with interventions:")
+                validate_one_epoch_pscbm_with_loss(test_loader, model, metrics, config.model.p_epochs, config, loss_fn, device, run, test=True, precomputed_dataset=False)
+                
         # Intervention curves.
         # When tuning hyperparameters for SCBM-loss PSCBM, I want to be able not to
         # calculate these intervention curves in order to save computaions.
