@@ -191,7 +191,7 @@ def train(config):
         message += f" and {config.model.cov_type} covariance." if "cov_type" in config.model.keys() else "."
         message += f"""Empirical covariance has been computed with {config.model.data_ratio*100}% of all samples
         and off-diagonal elements of the covariance matrix were scaled down by a factor of {config.model.covariance_scaling}.
-        The condition of the empirical covariance is {torch.linalg.cond(model.covariance)}.
+        The condition of the empirical covariance is {torch.linalg.cond(model.covariance)}. The rank of the matrix is {torch.linalg.matrix_rank(model.covariance)}.
         """ if cov_type.startswith("empirical") else ""
         print(message)
         if config.model.get("load_weights", False):
@@ -523,8 +523,8 @@ def train(config):
                     print(f"\nTRAINING ON INTERVENTIONS FINISHED, MODEL SAVED!\n Path to model parameters: {join(experiment_path, 'model_trained_int.pth')}", flush=True)
                 else:
                     print("\nTRAINING ON INTERVENTIONS FINISHED", flush=True)
-                print("Evaluating inference performance on test set for covariance trained with interventions:")
-                validate_one_epoch_pscbm_with_loss(test_loader, model, metrics, config.model.p_epochs, config, loss_fn, device, run, test=True, precomputed_dataset=False)
+            print("Evaluating the final model on the test set:")
+            validate_one_epoch_pscbm_with_loss(test_loader, model, metrics, config.model.p_epochs, config, loss_fn, device, run, test=True, precomputed_dataset=False)
                 
         # Intervention curves.
         # When tuning hyperparameters for SCBM-loss PSCBM, I want to be able not to
