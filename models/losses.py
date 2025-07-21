@@ -139,7 +139,9 @@ class SCBLoss(nn.Module):
         self.alpha = alpha if config.training_mode == "joint" else 1.0
         self.reg_precision = config.reg_precision
         self.reg_weight = config.reg_weight
-        self.reg_clamp = torch.tensor(config.get("reg_clamp", None))
+        self.reg_clamp = config.get("reg_clamp", None)
+        if self.reg_clamp is not None:
+            self.reg_clamp = torch.tensor(self.reg_clamp)
 
     def forward(
         self,
