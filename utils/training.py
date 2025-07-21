@@ -1021,25 +1021,28 @@ def create_optimizer(config, model):
         else:
             return torch.optim.AdamW(optim_params)
 
-def create_lr_scheduler(config, optimizer, interventions=False):
-	if interventions:
-		epochs = config.model.i_epochs
-	else:
-		epochs = config.model.p_epochs
-	scheduler_type = config.model.get("lr_scheduler", "step")
-	if scheduler_type == "step":
-		lr_scheduler = torch.optim.lr_scheduler.StepLR(
-			optimizer,
-			step_size=0.34*epochs,
-			gamma=1/config.model.get("lr_divisor", 10),
-			)
-	else: #"cosine":
-		lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-			optimizer,
-			epochs,
-			last_epoch=-1,
+def create_lr_scheduler(config, optimizer, interventions=False, num_epochs=None):
+    if num_epochs is not None:
+        epochs = num_epochs
+    else:
+        if interventions:
+            epochs = config.model.i_epochs
+        else:
+            epochs = config.model.p_epochs
+    scheduler_type = config.model.get("lr_scheduler", "step")
+    if scheduler_type == "step":
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=0.34*epochs,
+            gamma=1/config.model.get("lr_divisor", 10),
         )
-	return lr_scheduler
+    else:  # "cosine":
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            epochs,
+            last_epoch=-1,
+        )
+    return lr_scheduler
 
 
 class Custom_Metrics(Metric):

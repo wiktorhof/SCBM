@@ -256,6 +256,7 @@ def train(config):
             if config.model.training_mode in ("sequential", "independent"):
                 print("\nStarting concepts training!\n")
                 mode = "c"
+                epochs = config.model.c_epochs
 
                 # Freeze the target prediction part
                 model.freeze_c()
@@ -297,16 +298,14 @@ def train(config):
             if config.model.training_mode in ("sequential", "independent"):
                 print("\nStarting target training!\n")
                 mode = "t"
+                epochs = config.model.t_epochs
             else:
                 print("\nStarting joint training!\n")
                 mode = "j"
+                epochs = config.model.j_epochs
 
             optimizer = create_optimizer(config.model, model)
-            lr_scheduler = optim.lr_scheduler.StepLR(
-                optimizer,
-                step_size=config.model.decrease_every,
-                gamma=1 / config.model.lr_divisor,
-            )
+            lr_scheduler = create_lr_scheduler(config, optimizer, epochs=epochs)
             print("Using the following optimizer:", optimizer.__class__.__name__,
                     "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
 
