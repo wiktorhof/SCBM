@@ -48,7 +48,7 @@ CBMs=(
 )
 
 
-seeds=( 101 202 303 404 505 606 707 808 909 )
+seeds=( 1001 2902 3073 4064 5055 6046 7073 8082 9091 )
 
 for i in "${!CBMs[@]}"
 do
@@ -57,9 +57,9 @@ done
 
 # Train with amortized covariance
 cov='amortized'
-lr_scheduler=
-lr=
-weight_decay=
+lr_scheduler='cosine'
+lr=0.0001
+weight_decay=0 #Doesn't have an effect
 
 for i in "${!CBMs[@]}"
 do
@@ -77,15 +77,15 @@ do
         model.train_interventions=False model.pretrain_covariance=True \
         model.calculate_curves=False model.learning_rate=${lr} model.weight_decay=${weight_decay} \
         'model.additional_tags=[SCBM_loss,final]' \
-        model.calculate_interventions=False
+        model.calculate_interventions=True
 
 done
 
 # Train with global covariance
 cov='global'
-lr_scheduler=
-lr=
-weight_decay=
+lr_scheduler='step'
+lr=0.001
+weight_decay=1
 
 for i in "${!CBMs[@]}"
 do
@@ -99,11 +99,11 @@ do
         save_model=${save_model} experiment_dir=${save_model_dir} \
         model.cov_type=${cov} model.mask_density_train=${mask_density} \
         model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} \
-        model.p_epochs=100 model.i_epochs=200 model.lr_scheduler=${lr_scheduler} \
+        model.p_epochs=200 model.i_epochs=200 model.lr_scheduler=${lr_scheduler} \
         model.train_interventions=False model.pretrain_covariance=True \
         model.calculate_curves=False model.learning_rate=${lr} model.weight_decay=${weight_decay} \
         'model.additional_tags=[SCBM_loss,final]' \
-        model.calculate_interventions=False
+        model.calculate_interventions=True
 
 done
 
