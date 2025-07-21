@@ -305,7 +305,7 @@ def train(config):
                 epochs = config.model.j_epochs
 
             optimizer = create_optimizer(config.model, model)
-            lr_scheduler = create_lr_scheduler(config, optimizer, epochs=epochs)
+            lr_scheduler = create_lr_scheduler(config, optimizer, num_epochs=epochs)
             print("Using the following optimizer:", optimizer.__class__.__name__,
                     "\nUsing the following learning rate scheduler:", lr_scheduler.__class__.__name__,)
 
