@@ -21,7 +21,6 @@ model='PSCBM'
 data_ratio=1
 covariance_scaling=1.0001
 concept_learning='hard'
-cov='amortized'
 train_batch_size=128
 reg_weight=1
 
@@ -30,26 +29,27 @@ save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 # 48 jobs in total. Each one takes ??? on 1 GPU. So totally it is 16 GPU hours.
-for cov in 'amortized' 'global'
+for cov in 'global'
 do
 for lr_scheduler in 'step' 'cosine'
 do
-    for lr in 0.001 
+    for lr in 0.0001
     do
-        for weight_decay in 0.01
+        for weight_decay in 16 32 64 
         do
-            for i in 11 
+            for i in 112 
             do
-                    tag=${model}_${cov}_inference_${lr_scheduler}_${lr}_decay_${weight_decay}
+                    tag=${model}_${cov}_interventions_${lr_scheduler}_${lr}_decay_${weight_decay}
                         sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
                         +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
                         model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
                         save_model=${save_model} experiment_dir=${save_model_dir} model.load_weights=True \
-                        model.cov_type=${cov} model.mask_density_train=${mask_density} \
+                        model.cov_type=${cov} model.mask_density_train=0.2 \
                         model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} \
                         model.p_epochs=200 model.i_epochs=200 model.lr_scheduler=${lr_scheduler} \
-                    model.train_interventions=False model.pretrain_covariance=True \
+                    model.train_interventions=True model.pretrain_covariance=False \
                     model.calculate_curves=False model.learning_rate=${lr} model.weight_decay=${weight_decay} \
+		    model.calculate_interventions=False \
                     'model.additional_tags=["hyperparams_interventions"]'
 
             done
