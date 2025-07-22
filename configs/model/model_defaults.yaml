@@ -3,13 +3,14 @@ model_directory: './pretrained_networks/' # Directory of pretrained models
 head_arch: 'linear' # Linear or nonlinear classifier ['linear', 'nonlinear']
 alpha: 1.0        # Weight of concept loss in joint training
 encoder_arch: 'resnet18' # Encoder architecture ['resnet18', 'simple_CNN', 'FCNN']
-
+additional_tags: [] # Additional tags for wandb logging
 # Training
 training_mode: 'joint' # Optimization method: ['joint', 'sequential', 'independent']
 validate_per_epoch: 30 # Periodicity to evaluate the model
 learning_rate: 0.0001 # Learning rate in the optimization
 optimizer: 'adam' # Optimizer: ['sgd','adam']
 decrease_every: 150 # Frequency of the learning rate decrease
+lr_scheduler: 'step' # lr_scheduler: step_lr or cosine
 lr_divisor: 2 # Rate of the learning rate decrease
 weight_decay: 0 # Weight decay
 train_batch_size: 64 # Batch size for the training set
@@ -26,3 +27,5 @@ straight_through: True # If Gumbel-Softmax, whether to do straight-through or no
 # Pre-trained model for interventions
 load_weights: False
 weights_dir: None
+
+calculate_interventions: True # Whether to calculate interventions after training

@@ -528,6 +528,21 @@ def train(config):
         # Intervention curves.
         # When tuning hyperparameters for SCBM-loss PSCBM, I want to be able not to
         # calculate these intervention curves in order to save computaions.
+        if config.model.get("test", False):
+            print("\nEVALUATION ON THE TEST SET:\n")
+            validate_one_epoch(
+                test_loader,
+                model,
+                metrics,
+                t_epochs,
+                config,
+                loss_fn,
+                device,
+                run,
+                test=True,
+                concept_names_graph=concept_names_graph,
+            )
+
         if config.model.get("calculate_interventions", True):
             print("\nPERFORMING INTERVENTIONS ON THE FINAL TRAINED MODEL:\n")
             intervene(
