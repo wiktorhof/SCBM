@@ -3,19 +3,32 @@ model_directory: './pretrained_networks/' # Directory of pretrained models
 head_arch: 'linear' # Linear or nonlinear classifier ['linear', 'nonlinear']
 alpha: 1.0        # Weight of concept loss in joint training
 encoder_arch: 'resnet18' # Encoder architecture ['resnet18', 'simple_CNN', 'FCNN']
+<<<<<<< HEAD
 additional_tags: [] # Additional tags for wandb logging
+||||||| 022708c
+
+=======
+additional_tags: []
+
+>>>>>>> a17a8a30e73774a1304879e5214cb698f4584cae
 # Training
 training_mode: 'joint' # Optimization method: ['joint', 'sequential', 'independent']
 validate_per_epoch: 30 # Periodicity to evaluate the model
 learning_rate: 0.0001 # Learning rate in the optimization
 optimizer: 'adam' # Optimizer: ['sgd','adam']
 decrease_every: 150 # Frequency of the learning rate decrease
+<<<<<<< HEAD
 lr_scheduler: 'step' # lr_scheduler: step_lr or cosine
 lr_divisor: 2 # Rate of the learning rate decrease
+||||||| 022708c
+lr_divisor: 2 # Rate of the learning rate decrease
+=======
+lr_divisor: 10 # Rate of the learning rate decrease
+>>>>>>> a17a8a30e73774a1304879e5214cb698f4584cae
 weight_decay: 0 # Weight decay
-train_batch_size: 64 # Batch size for the training set
-val_batch_size: 128 # Batch size for the validation and test sets
-
+train_batch_size: 128 # Batch size for the training set
+val_batch_size: 600 # Batch size for the validation and test sets
+lr_scheduler: 'step'
 j_epochs: 300 # Number of epochs for joint training
 c_epochs: 200 # Number of epochs for first stage training in sequential & independent training
 t_epochs: 100 # Number of epochs for second stage training in sequential & independent training
@@ -26,6 +39,13 @@ straight_through: True # If Gumbel-Softmax, whether to do straight-through or no
 
 # Pre-trained model for interventions
 load_weights: False
+<<<<<<< HEAD
 weights_dir: None
 
 calculate_interventions: True # Whether to calculate interventions after training
+||||||| 022708c
+weights_dir: None
+=======
+weights_dir: None
+calculate_interventions: True
+>>>>>>> a17a8a30e73774a1304879e5214cb698f4584cae

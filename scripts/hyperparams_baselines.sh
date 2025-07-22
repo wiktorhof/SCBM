@@ -31,7 +31,7 @@ echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
 for cov in 'amortized' 'global'
 do
-for lr_scheduler in 'step' 'cosine'
+for lr_scheduler in 'cosine'
 do
 for weight_decay in 0 0.01
 do
@@ -51,7 +51,7 @@ done
 
 model='CBM'
 
-for lr_scheduler in 'step' 'cosine'
+for lr_scheduler in 'cosine'
 do
 for weight_decay in 0 0.01
 do
@@ -63,6 +63,5 @@ do
                     model.train_batch_size=${train_batch_size} model.lr_scheduler=${lr_scheduler} \
                     'model.additional_tags=[hyperparams_CBM]' \
                     model.calculate_interventions=False
-
 done
 done

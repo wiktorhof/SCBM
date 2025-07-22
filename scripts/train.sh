@@ -2,7 +2,7 @@
 #SBATCH --job-name=CBM
 #SBATCH --output="/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/job-%J"
 #SBATCH --cpus-per-task=2
-#SBATCH --time=0-04:00:00
+#SBATCH --time=0-24:00:00
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1
 #Lines that start with SBATCH are merely comments for bash. I cannot use variables there
