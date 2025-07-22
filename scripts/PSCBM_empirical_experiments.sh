@@ -54,7 +54,7 @@ done
 
 cov='empirical_true'
 # I limit data ratios to 2 extremes due to resource constraints.
-for data_ratio in 1
+for data_ratio in 1 0.3 0.05
 do
 for i in "${!CBMs[@]}"
 do
@@ -68,7 +68,8 @@ do
         save_model=${save_model} experiment_dir=${save_model_dir} \
         model.cov_type=${cov} model.mask_density_train=${mask_density} \
 	model.covariance_scaling=${covariance_scaling} \
-        'model.additional_tags=[empirical,final,partial_data]'
+        'model.additional_tags=[empirical,final,partial_data]' \
+        model.calculate_interventions=False +model.test=True
 
 done
 done
