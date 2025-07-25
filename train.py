@@ -148,7 +148,7 @@ def train(config):
         # Identity matrix as covariance as a baseline and for debugging purposes - it should behave the same way are a regular CBM
         elif cov_type == "identity":
             model.sigma_concepts = model.covariance = torch.eye(config.data.num_concepts).to(device)
-        elif cov_type == "global":
+        elif cov_type == "global" and not config.model.load_weights:
             lower_triangle, _ = get_empirical_covariance(train_loader, ratio=data_ratio, scaling_factor=covariance_scaling)
             lower_triangle.to(device)
             rows, cols = torch.tril_indices(
@@ -179,8 +179,8 @@ def train(config):
             train_one_epoch = train_one_epoch_scbm
             intervene = intervene_scbm
         elif config.model.model == "pscbm":
-            validate_one_epoch = validate_one_epoch_pscbm_with_interventions
-            train_one_epoch = train_one_epoch_pscbm_with_interventions
+            validate_one_epoch = validate_one_epoch_pscbm_with_loss
+            train_one_epoch = train_one_epoch_pscbm_with_loss
             intervene = intervene_pscbm
 
         # if config.model.model == "pscbm" and config.model.load_weights and config.model.cov_type in ("empirical_true", "empirical_predicted"):
@@ -530,18 +530,21 @@ def train(config):
         # calculate these intervention curves in order to save computaions.
         if config.model.get("test", False):
             print("\nEVALUATION ON THE TEST SET:\n")
-            validate_one_epoch(
-                test_loader,
-                model,
-                metrics,
-                t_epochs,
-                config,
-                loss_fn,
-                device,
-                run,
-                test=True,
-                concept_names_graph=concept_names_graph,
-            )
+            if config.model.model == "pscbm":
+                validate_one_epoch_pscbm_with_loss(test_loader, model, metrics, config.model.p_epochs, config, loss_fn, device, run, test=True, precomputed_dataset=False)
+            else:
+                validate_one_epoch(
+                    test_loader,
+                    model,
+                    metrics,
+                    t_epochs,
+                    config,
+                    loss_fn,
+                    device,
+                    run,
+                    test=True,
+                    concept_names_graph=concept_names_graph,
+                )
 
         if config.model.get("calculate_interventions", True):
             print("\nPERFORMING INTERVENTIONS ON THE FINAL TRAINED MODEL:\n")
