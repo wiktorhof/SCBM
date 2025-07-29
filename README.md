@@ -1,12 +1,22 @@
-# Stochastic Concept Bottleneck Models
-This repository contains the code for the paper "*Stochastic Concept Bottleneck Models*" (SCBM).
-(https://neurips.cc/virtual/2024/poster/94002)
+# Post-hoc Stochastic Concept Bottleneck Models
+This repository contains the code for the thesis "*Post-hoc Stochastic Concept Bottleneck Models*" (SCBM).
+(not yet available online)
 
-**Abstract**: Concept Bottleneck Models (CBMs) have emerged as a promising interpretable method whose final prediction is based on intermediate, human-understandable concepts rather than the raw input. 
-Through time-consuming manual interventions, a user can correct wrongly predicted concept values to enhance the model's downstream performance.
-We propose *Stochastic Concept Bottleneck Models* (SCBMs), a novel approach that models concept dependencies. In SCBMs, a single-concept intervention affects all correlated concepts, thereby improving intervention effectiveness. Unlike previous approaches that model the concept relations via an autoregressive structure, we introduce an explicit, distributional parameterization that allows SCBMs to retain the CBMs' efficient training and inference procedure. 
-Additionally, we leverage the parameterization to derive an effective intervention strategy based on the confidence region.
-We show empirically on synthetic tabular and natural image datasets that our approach improves intervention effectiveness significantly. Notably, we showcase the versatility and usability of SCBMs by examining a setting with CLIP-inferred concepts, alleviating the need for manual concept annotations.
+**Abstract**: Recent studies have shown that modeling concept dependencies in Concept Bottle-
+neck Models (CBM) can lead to significant improvements in performance, espe-
+cially when concept interventions are made. In this paper, we introduce Post-hoc
+Stochastic Concept Bottleneck Models (PSCBM), a method to augment an existing
+CBM that treats concepts as independent with a multivariate normal distribution,
+which can model concept correlations. Importantly, the existing model doesn’t
+need to be retrained. It is only necessary to learn the covariance matrix of the
+normal distribution. For this, we propose 2 methods: 1. minimizing the regular
+CBM loss without interventions, 2. minimizing the same loss after an intervention
+on a random subset of concepts. In addition, we propose the usage of empirical
+covariance of the training dataset, which doesn’t require any training. We evaluate
+our methods on the CUB-200-2011 dataset with various intervention strategies,
+showing that they can achieve an improvement over a simple CBM in terms of
+concept and target accuracy at test time and with interventions. We also discuss
+some weaknesses of our methods.
 
 ## Instructions
 
@@ -19,26 +29,4 @@ We show empirically on synthetic tabular and natural image datasets that our app
 
 ## Running Experiments
 
-We provide a script in the `./scripts/` directory to run experiments on a cluster and reproduce our results. For local experimentation, we provide selected examples:
-
-- **Amortized Variant on CUB Dataset (default)**:  
-  `python train.py +model=SCBM +data=CUB`  
-- **Global Variant without regularization on CUB Dataset:**:  
-  `python train.py +model=SCBM +data=CUB model.cov_type='global' model.reg_precision=None`  
-- **Amortized Variant on Synthetic Dataset**:  
-  `python train.py +model=SCBM +data=synthetic model.encoder_arch='FCNN' model.j_epochs=150`  
-
-## Citing
-To cite SCBM please use the following BibTEX entry:
-
-```
-@inproceedings{
-vandenhirtz2024stochastic,
-title={Stochastic Concept Bottleneck Models},
-author={Vandenhirtz, Moritz and Laguna, Sonia and Marcinkevi{\v{c}}s, Ri{\v{c}}ards and Vogt, Julia E},
-booktitle={Thirty-eighth Conference on Neural Information Processing Systems},
-year={2024}
-url={https://openreview.net/forum?id=iSjqTQ5S1f}
-}
-```
-
+We provide scripts in the `./scripts/` directory to run experiments on a cluster and reproduce our results. 
