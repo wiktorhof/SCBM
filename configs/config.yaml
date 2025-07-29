@@ -9,5 +9,5 @@ logging:
   project: 'PSCBM' # Name of the wandb project
   mode: 'online' # Whether to log to wandb [online, offline, disabled]
   entity: "wiktorh" # Your wandb entity
-  # host: "http://wandb-vogtlab.leomed.ethz.ch:46766"
-  host: "https://api.wandb.ai"
+  host: "http://wandb-vogtlab.leomed.ethz.ch:46766"
+  # host: "https://api.wandb.ai"

@@ -34,19 +34,18 @@ cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 # 3 hard CBMs trained with different seeds. Each one is evaluated 3 times.
 CBMs=(
-#    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
- #   '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-  #  '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
-   # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
+ #   '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
     '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-    #'/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
-    #'/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
-    #'/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-    #'/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+ # '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+   '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
+  #  '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
+    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
 )
 
-#seeds=( 101 202 303 404 505 606 707 808 909 )
-seeds=(505)
+seeds=(202 404 606 707 808 909)
 for i in "${!CBMs[@]}"
 do
     echo "${CBMs[$i]} with seed ${seeds[$i]}"
@@ -62,14 +61,14 @@ do
         seed=${seeds[$i]}
         tag=${model}_${cov}_${data_ratio}
         sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
-        +data=$data experiment_name="${data}_${tag}_${i}" seed=$seed model.tag=$tag \
+        +data=$data experiment_name="${data}_${tag}_${seeds[$i]}" seed=$seed model.tag=$tag \
         model.load_weights=True model.weights_dir=$CBM model.data_ratio=${data_ratio} \
         model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
         save_model=${save_model} experiment_dir=${save_model_dir} \
         model.cov_type=${cov} model.mask_density_train=${mask_density} \
-	model.covariance_scaling=${covariance_scaling} \
+	model.covariance_scaling=${covariance_scaling} model.val_batch_size=64 \
         'model.additional_tags=[empirical,final,partial_data]' \
-        model.calculate_interventions=False +model.test=True
+        model.calculate_interventions=False model.test=True
 
 done
 done
