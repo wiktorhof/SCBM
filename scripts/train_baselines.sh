@@ -23,7 +23,7 @@ lr=0.0001
 lr_scheduler='step'
 weight_decay=0.01
 
-for i in 202 303 # 3 random seeds
+for i in 404 505 606 707 # 3 random seeds
 do
 
 save_model='True'
@@ -31,7 +31,7 @@ save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
 cd /cluster/home/wiktorh/Desktop/scbm/scripts/
 echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
-for cov in 'global' 'amortized'
+for cov in 'global'
 do
                     tag=${model}_${cov}_${lr_scheduler}_decay_${weight_decay}_final
                     sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
@@ -40,7 +40,7 @@ do
                     save_model=${save_model} experiment_dir=${save_model_dir} \
                     model.cov_type=${cov} model.weight_decay=${weight_decay} \
                     model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} model.lr_scheduler=${lr_scheduler} \
-                    'model.additional_tags=[final]'
+                    model.val_batch_size=256 'model.additional_tags=[final,conf_interval]'
 
 done
 done
