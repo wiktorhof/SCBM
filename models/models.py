@@ -92,6 +92,33 @@ def load_weights(model: nn.Module, config: DictConfig):
                         f"for concordance.\n")
             else:
                 raise FileNotFoundError("No model with corresponding configuration to load weights from it.")
+# TODO Introduce an inheritance structure: CBM -> SCBM -> PSCBM and make this function 
+# part of SCBM class            
+def initialize_covariance(config: DictConfig, model: nn.Module, train_loader: torch.utils.data.DataLoader, device):
+    cov_type = model.cov_type
+    if cov_type.startswith("empirical") or cov_type=="global":
+        data_ratio = config.model.get("data_ratio", 1)
+        covariance_scaling = config.model.get("covariance_scaling", None)
+    # The below computations could be moved out in part, but they aren't too expensive.
+    if cov_type == "global":
+        lower_triangle, _ = get_empirical_covariance(train_loader, ratio=data_ratio, scaling_factor=covariance_scaling)
+        lower_triangle.to(device)
+        rows, cols = torch.tril_indices(
+            row=config.data.num_concepts, col=config.data.num_concepts, offset=0
+        )
+        model.sigma_concepts = torch.nn.Parameter(lower_triangle[rows, cols])
+        # Fill the lower triangle of the covariance matrix with the values and make diagonal positive
+        diag_idx = rows == cols
+        with torch.no_grad():
+            model.sigma_concepts[diag_idx] = (
+                lower_triangle[rows, cols][diag_idx].expm1().clamp_min(1e-6).log()
+        )  # softplus inverse of diag
+    elif cov_type == "amortized":
+        # Pytorch default initialization with what is done in SCBM init
+        stdv = 1. / math.sqrt(model.sigma_concepts.weight.size(1))
+        model.sigma_concepts.weight.data.uniform_(-stdv*0.01, stdv*0.01) 
+        if model.sigma_concepts.bias is not None:
+            model.sigma_concepts.bias.data.uniform_(-stdv, stdv)
 
 class PSCBM(nn.Module):
     """

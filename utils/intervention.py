@@ -20,15 +20,10 @@ from utils.utils import numerical_stability_check
 
 def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, loss_fn, device, run):
     model.eval()
-    policies = config.model.inter_policy.split(",")
-    strategies = config.model.inter_strategy.split(",")
+    # Remove potential spaces between policy & strategy names
+    policies = config.model.inter_policy.replace(' ','').split(",")
+    strategies = config.model.inter_strategy.replace(' ','').split(",")
     num_interventions = min(config.data.num_interventions, config.data.num_concepts)
-
-    # if model.cov_type in ("empirical_true", "empirical_predicted"):
-    #     c_cov = model.covariance
-
-    # Intervening with different strategies
-    # first_intervention = True
 
     run.define_metric("intervention/num_concepts_intervened")
     for strategy in strategies:
@@ -73,13 +68,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                         target_true,
                         c_cov,
                         cov_not_triang=True,
-                    )
-                    # if model.cov_type in ("empirical_true", "empirical_predicted", "identity"):
-                    #     c_cov = model.covariance
-                    #     c_cov = numerical_stability_check(c_cov, device=device)
-                    #     # Add the batch dimension in the beginning
-                    #     c_cov = c_cov.repeat(concepts_true.shape[0], 1, 1)
-                    
+                    )                    
 
                     c_cov_norm = torch.norm(c_cov) / (c_cov.numel() ** 0.5)
 
@@ -191,11 +180,6 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             target_true,
                             concepts_cov_original,
                         ) = [item.to(device) for item in batch]
-                        # DEBUG
-                        # if k == 0:
-                        #     cov_list.append(concepts_cov_interv[0].cpu())
-                        #     mu_list.append(concepts_mu_interv[0].cpu())
-                        #     mask_list.append(concepts_mask[0].cpu())
                         if config.model.concept_learning == "autoregressive":
                             raise NotImplementedError()
                         else:
@@ -203,9 +187,6 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                             concepts_mask = intervention_policy.compute_intervention_mask(
                             concepts_mask, concepts_pred_probs=concepts_pred_probs)
 
-                            # Good. Here I have concept probabilities after the intervention.
-                            # No need to condition arguments and returned values on strategy, because always PSCBM Strategy is used.
-                            # It is well possible that various can be used with PSCBM
                             concepts_mu_interv, concepts_cov_interv, c_mcmc_probs, c_mcmc_logits = intervention_strategy.compute_intervention(
                                 concepts_mu_original,
                                 concepts_cov_original,
@@ -239,7 +220,7 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                                                                  ])
                 # Calculate and log metrics
                 metrics_dict = metrics.compute(validation=True, config=config)
-               # define which metrics will be plotted against it
+                # Define which metrics will be plotted against it
                 for i, (k, v) in enumerate(metrics_dict.items()):
                     run.log(
                         {
@@ -271,33 +252,6 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
                 )
             end_time = time.perf_counter()
             run.log({f"intervention_{strategy}_{policy}/total_time": end_time-start_time})
-            # DEBUG
-            # os.makedirs(f"saved_tensors/{policy}", exist_ok=True)
-            # with pd.ExcelWriter(f'saved_tensors/{policy}/covariances_scaling_{config.model.covariance_scaling}.xlsx',
-            # engine='openpyxl') as writer:
-            #     for step in [0, 20, 40, 60, 80, 100, 111]:
-            #         array = cov_list[step].numpy()
-            #         df = pd.DataFrame(array)
-            #         sheet_name = f"num_interventions_{step}"
-            #         df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
-
-            # with pd.ExcelWriter(f"saved_tensors/{policy}/mu_scaling_{config.model.covariance_scaling}.xlsx",
-            # engine="openpyxl") as writer:
-            #     for step in [0, 20, 40, 60, 80, 100, 111]:
-            #         array = mu_list[step].numpy()
-            #         df = pd.DataFrame(array)
-            #         sheet_name = f"num_interventions_{step}"
-            #         df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
-
-            # with pd.ExcelWriter(f"saved_tensors/{policy}/mask_scaling_{config.model.covariance_scaling}.xlsx",
-            # engine="openpyxl") as writer:
-            #     for step in [0, 20, 40, 60, 80, 100, 111]:
-            #         array = mask_list[step].numpy()
-            #         df = pd.DataFrame(array)
-            #         sheet_name = f"num_interventions_{step}"
-            #         df.to_excel(writer, sheet_name=sheet_name, index=False, header=False)
-
-
 
     return
 
@@ -330,8 +284,9 @@ def intervene_scbm(
         None
     """
     model.eval()
-    policies = config.model.inter_policy.split(",")
-    strategies = config.model.inter_strategy.split(",")
+    # Remove potential spaces between policy & strategy names
+    policies = config.model.inter_policy.replace(' ','').split(",")
+    strategies = config.model.inter_strategy.replace(' ','').split(",")
     num_interventions = min(config.data.num_interventions, config.data.num_concepts)
 
     # Intervening with different strategies
@@ -634,15 +589,17 @@ def intervene_cbm(
         None
     """
     model.eval()
-    policies = config.model.inter_policy.split(",")
-    strategies = config.model.inter_strategy.split(",")
+    # Remove potential spaces between policy & strategy names
+    policies = config.model.inter_policy.replace(' ','').split(",")
+    strategies = config.model.inter_strategy.replace(' ','').split(",")
     num_interventions = min(config.data.num_interventions, config.data.num_concepts)
-    if config.model.model == "cbm" and config.model.concept_learning in (
-        "hard",
-        "autoregressive",
-        "embedding",
-    ):
-        strategies = ["hard"]
+    # Lift this restriction s.t. other strategies could be evaluated with hard CBM as well
+    # if config.model.model == "cbm" and config.model.concept_learning in (
+    #     "hard",
+    #     "autoregressive",
+    #     "embedding",
+    # ):
+    #     strategies = ["hard"]
     # Intervening with different strategies
     first_intervention = True
     for strategy in strategies:
@@ -1002,7 +959,8 @@ def define_strategy(inter_strategy, train_loader, model, device, config):
         USING FOLLOWING STRATEGY: PercentileStrategy
     """
     if config.model.model == "cbm":
-        if config.model.concept_learning in ("hard", "autoregressive", "embedding"):
+        if inter_strategy == 'hard':
+        # if config.model.concept_learning in ("hard", "autoregressive", "embedding"):
             inter_strategy = HardCBMStrategy()
         elif inter_strategy == "simple_perc":
             inter_strategy = PercentileStrategy()
@@ -1067,7 +1025,7 @@ class PSCBM_Strategy:
         if inter_strategy == "simple_perc":
             self.interv_strat = PercentileStrategy()
         elif inter_strategy == "hard":
-            self.interv_strat = PercentileStrategy(percentile=0)
+            self.interv_strat = PercentileStrategy(percentile=0) # HardCBMStrategy doesn't have the logits function
         elif inter_strategy == "emp_perc":
             self.interv_strat = EmpiricalPercentileStrategy(
                 train_loader=train_loader, model=model.CBM, device=device, is_scbm=False
@@ -1258,6 +1216,8 @@ class SCBM_Strategy:
         self.act_c = nn.Sigmoid()
         if inter_strategy == "simple_perc":
             self.interv_strat = PercentileStrategy()
+        elif inter_strategy == "hard":
+            self.interv_strat = PercentileStrategy(percentile=0) # HardCBMStrategy doesn't have the logits function
         elif inter_strategy == "emp_perc":
             self.interv_strat = EmpiricalPercentileStrategy(
                 train_loader=train_loader, model=model, device=device, is_scbm=True
@@ -1401,30 +1361,16 @@ class SCBM_Strategy:
 
         return interv_mu, interv_cov, mcmc_probs, mcmc_logits
 
-# What is the point of this class which has half the functionality of PercentileStrategy and doesn't make any use of the 'Stochastic' part?
-class SCBMPercentileStrategy:
-    # Set intervened concept logits to 0.05 & 0.95
-    def __init__(self):
-        pass
-
-    def compute_intervened_logits(self, c_mu, c_cov, c_true, c_mask):
-        c_intervened_probs = (0.05 + 0.9 * c_true) * c_mask
-        c_intervened_logits = torch.logit(c_intervened_probs, eps=1e-6)
-        return c_intervened_logits
-
 
 class PercentileStrategy:
     # Set intervened concepts to 0.05 & 0.95 probabilities
-    def __init__(self, percentile=None):
+    def __init__(self, percentile=0.05):
         self.percentile = percentile
+        print (f"Percentile Strategy will set value of present concepts to {1 - self.percentile} and of absent concepts to {self.percentile}.")
 
     def _compute_intervened_probs(self, c_true, c_mask):
-        if self.percentile:
-            return (self.percentile + (1-2*self.percentile)*c_true) * c_mask
-        else:
-            return (0.05 + 0.9 * c_true) * c_mask
+        return (self.percentile + (1-2*self.percentile)*c_true) * c_mask
         
-
     def compute_intervened_logits(self, c_mu, c_cov, c_true, c_mask):
         c_intervened_probs = self._compute_intervened_probs(c_true, c_mask)
         c_intervened_logits = torch.logit(c_intervened_probs, eps=1e-6)

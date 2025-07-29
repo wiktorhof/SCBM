@@ -20,7 +20,7 @@ from omegaconf import DictConfig, OmegaConf
 import wandb
 
 from models.losses import create_loss
-from models.models import create_model
+from models.models import create_model, initialize_covariance
 
 from utils.data import get_data, get_empirical_covariance, get_empirical_covariance_of_predictions, get_concept_groups
 from utils.intervention import intervene_cbm, intervene_scbm, intervene_pscbm, define_strategy
@@ -109,9 +109,6 @@ def find_hyperparameters(config):
         config.data,
         gen,
     )
-
-    
-
     # Get concept names for plotting
     concept_names_graph = get_concept_groups(config.data)
 
@@ -122,36 +119,39 @@ def find_hyperparameters(config):
         # Initialize model and training objects
         config.model["cov_type"] = cov_type
         model = create_model(config)
-    
-        metrics = Custom_Metrics(config.data.num_concepts, device).to(device)
         model.to(device)
+        metrics = Custom_Metrics(config.data.num_concepts, device).to(device)
+        
         loss_fn = create_loss(config)
         # For interventions_validation_dataloader always use the same seed s.t.
         # All models are evaluated on the same validation dataset
         # Intervention strategy defining how to set values for intervened concepts could also be
-        # Specified by the configuration file                
-        intervention_strategy = define_strategy(
-            config.model.get("training_strategy", "simple_perc"), train_loader, model, device, config
-        )
-        reset_random_seeds(42)
-        generation_start_time = time.perf_counter()
-        interventions_validation_dataloader = create_pscbm_validation_dataloader(
-                            val_loader,
-                            model,
-                            metrics,
-                            config,
-                            intervention_strategy,
-                            loss_fn,
-                            device,
-                            num_masks=config.model.num_masks_val,
-                            mask_density=config.model.mask_density_val,
-                        )
-        generation_end_time = time.perf_counter()
-        print(f"Validation dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
-        generation_start_time = time.perf_counter()
-        interventions_training_dataloader = generate_pscbm_training_dataloader(train_loader, model, 0, config, device, run)
-        generation_end_time = time.perf_counter()
-        print(f"Training dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
+        # Specified by the configuration file
+        # In case that we are dealing with a PSCBM, generate the special loaders.
+        if config.model.model == "pscbm":
+
+            intervention_strategy = define_strategy(
+                config.model.get("training_strategy", "simple_perc"), train_loader, model, device, config
+            )
+            reset_random_seeds(42)
+            generation_start_time = time.perf_counter()
+            interventions_validation_dataloader = create_pscbm_validation_dataloader(
+                                val_loader,
+                                model,
+                                metrics,
+                                config,
+                                intervention_strategy,
+                                loss_fn,
+                                device,
+                                num_masks=config.model.num_masks_val,
+                                mask_density=config.model.mask_density_val,
+                            )
+            generation_end_time = time.perf_counter()
+            print(f"Validation dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
+            generation_start_time = time.perf_counter()
+            interventions_training_dataloader = generate_pscbm_training_dataloader(train_loader, model, 0, config, device)
+            generation_end_time = time.perf_counter()
+            print(f"Training dataset has been generated in {(generation_end_time - generation_start_time):.2f} seconds.")
           # Reset random seed for the next model
         # ---------------------------------
         #       For every training method, run independent hyperparameter checks
@@ -180,30 +180,7 @@ def find_hyperparameters(config):
 
                 # For every hyperparameter combination, reinitialize the covariance matrix
                 # Initialize covariance with empirical covariance
-                if cov_type.startswith("empirical") or cov_type=="global":
-                    data_ratio = config.model.get("data_ratio", 1)
-                    covariance_scaling = config.model.get("covariance_scaling", None)
-                # The below computations could be moved out in part, but they aren't too expensive.
-                if cov_type == "global":
-                    lower_triangle, _ = get_empirical_covariance(train_loader, ratio=data_ratio, scaling_factor=covariance_scaling)
-                    lower_triangle.to(device)
-                    rows, cols = torch.tril_indices(
-                        row=config.data.num_concepts, col=config.data.num_concepts, offset=0
-                    )
-                    model.sigma_concepts = torch.nn.Parameter(lower_triangle[rows, cols])
-                    # Fill the lower triangle of the covariance matrix with the values and make diagonal positive
-                    diag_idx = rows == cols
-                    with torch.no_grad():
-                        model.sigma_concepts[diag_idx] = (
-                            lower_triangle[rows, cols][diag_idx].expm1().clamp_min(1e-6).log()
-                    )  # softplus inverse of diag
-                elif cov_type == "amortized":
-                    # Pytorch default initialization with what is done in SCBM init
-                    stdv = 1. / math.sqrt(model.sigma_concepts.weight.size(1))
-                    model.sigma_concepts.weight.data.uniform_(-stdv*0.01, stdv*0.01) 
-                    if model.sigma_concepts.bias is not None:
-                        model.sigma_concepts.bias.data.uniform_(-stdv, stdv) 
-
+                initialize_covariance(config, model, train_loader, device)
                 config.model["lr_scheduler"] = scheduler
                 config.model["learning_rate"] = lr
                 config.model["weight_decay"] = weight_decay

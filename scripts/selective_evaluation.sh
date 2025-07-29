@@ -47,7 +47,34 @@ echo Submitting job
                     +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
                     model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
                     save_model=${save_model} experiment_dir=${save_model_dir} \
-                    model.cov_type=${cov} \
+                    model.cov_type=${cov} ++model.calculate_interventions=True \
                     model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} model.lr_scheduler=${lr_scheduler} \
                     'model.additional_tags=[final]'
+done
+
+cov='amortized'
+pretrained_locations_amortized=(
+    "/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/scbm/hard/CUB/20250721-134904_539ac"
+    "/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/scbm/hard/CUB/20250721-215124_8db4f"
+    "/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/scbm/hard/CUB/20250721-215159_f24aa"
+)
+
+for location in $pretrained_locations_amortized
+do
+echo ${location}
+save_model='False'
+save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
+cd /cluster/home/wiktorh/Desktop/scbm/scripts/
+echo Submitting job
+
+                    tag=${model}_${cov}_${lr_scheduler}_decay_${weight_decay}_final
+                    sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
+                    model.load_weights=True model.weights_dir=${location} \
+                    +data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
+                    model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
+                    save_model=${save_model} experiment_dir=${save_model_dir} \
+                    model.cov_type=${cov} ++ model.calculate_intervention=True \
+                    model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} model.lr_scheduler=${lr_scheduler} \
+                    'model.additional_tags=[final]'
+
 done

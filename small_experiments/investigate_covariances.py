@@ -1,3 +1,7 @@
+"""
+Several utilities to compare covariance matrices. Specifically, to compare empirical covariances calculated with different data ratios and scalings.
+"""
+
 import torch
 import pandas as pd
 from tqdm import tqdm
