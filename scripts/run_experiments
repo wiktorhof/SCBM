@@ -1,9 +1,9 @@
 #!/bin/bash
 
 eval "$(conda shell.bash hook)"
-export CUBLAS_WORKSPACE_CONFIG=":4096:8"
-export LIBRARY_PATH="/path/to/file/stubs:$LIBRARY_PATH"
-export LDFLAGS=-L/path/to/file/stub
+
+
+
 
 
 tag='SCBM_experiments'
