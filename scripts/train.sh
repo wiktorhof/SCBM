@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=CBM
-#SBATCH --output="/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/job-%J"
+#SBATCH --output="/path/to/file/job-%J"
 #SBATCH --cpus-per-task=2
 #SBATCH --time=0-24:00:00
 #SBATCH -p gpu
@@ -9,9 +9,9 @@
 #Lines that start with SBATCH are merely comments for bash. I cannot use variables there
 
 now=$(date +%y:%m:%d:%H:%M)
-output_filename=~/Desktop/scbm/job_outputs/$now.txt
+output_filename=~/path/to/file/$now.txt
 
-cd /cluster/home/wiktorh/Desktop/scbm
+cd /path/to/file/scbm
 echo $(which python)
 #source ~/.bashrc
 conda init
@@ -21,5 +21,5 @@ echo
 echo $(which python)
 
 python -u train.py "$@"
-#python ~/Desktop/test/environment_test.py
+#python ~/path/to/file/environment_test.py
 

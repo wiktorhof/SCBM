@@ -5,14 +5,14 @@
 #Obtained by tuning.
 eval "$(conda shell.bash hook)"
 export CUBLAS_WORKSPACE_CONFIG=":4096:8"
-export LIBRARY_PATH="/usr/local/cuda/lib64/stubs:$LIBRARY_PATH"
-export LDFLAGS=-L/usr/local/cuda/lib64/stub
+export LIBRARY_PATH="/path/to/file/stubs:$LIBRARY_PATH"
+export LDFLAGS=-L/path/to/file/stub
 
 
 conda activate scbm
 today=$(date +%y-%m-%d)
 export WANDB_API_KEY=local-be0546acbdda04d2949d57a384bcb9552c9aede7
-output_dir=/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/$today
+output_dir=/path/to/file/$today
 output_file=${output_dir}/job-%J.txt
 if [ ! -d ${output_dir} ]; then echo Creating log directory for $today.; mkdir ${output_dir};
 else echo Log directory exists already.;
@@ -30,21 +30,21 @@ train_batch_size=128
 reg_weight=1
 
 save_model='True'
-save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
-cd /cluster/home/wiktorh/Desktop/scbm/scripts/
+save_model_dir=/path/to/file/
+cd /path/to/file/
 echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
 
 CBMs=(
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250401-162246_24835'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_fe6d3'
-    '/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/cbm/hard/CUB/20250616-151111_f99e7'
+    '/path/to/file/20250401-162246_24835'
+    '/path/to/file/20250616-151111_fe6d3'
+    '/path/to/file/20250616-151111_f99e7'
+    '/path/to/file/20250401-162246_24835'
+    '/path/to/file/20250616-151111_fe6d3'
+    '/path/to/file/20250616-151111_f99e7'
+    '/path/to/file/20250401-162246_24835'
+    '/path/to/file/20250616-151111_fe6d3'
+    '/path/to/file/20250616-151111_f99e7'
 )
 
 

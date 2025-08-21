@@ -1,13 +1,12 @@
 #!/bin/bash
 # This script is used to perform hyperparameter tuning for PSCBM trained
-# With SCBM loss.
-# Another script is used to tune parameters for training with interventions.
+# without interventions.
 # The script is designed to be run on a SLURM cluster.
 eval "$(conda shell.bash hook)"
 conda activate scbm
 today=$(date +%y-%m-%d)
 export WANDB_API_KEY=local-be0546acbdda04d2949d57a384bcb9552c9aede7
-output_dir=/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/$today
+output_dir=/path/to/file/$today
 output_file=${output_dir}/job-%J.txt
 if [ ! -d ${output_dir} ]; then echo Creating log directory for $today.; mkdir ${output_dir};
 else echo Log directory exists already.;
@@ -26,8 +25,8 @@ train_batch_size=128
 reg_weight=1
 
 save_model='False'
-save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
-cd /cluster/home/wiktorh/Desktop/scbm/scripts/
+save_model_dir=/path/to/file/
+cd /path/to/file/
 echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
 for cov in 'global'

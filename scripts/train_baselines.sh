@@ -4,7 +4,7 @@ eval "$(conda shell.bash hook)"
 conda activate scbm
 today=$(date +%y-%m-%d)
 export WANDB_API_KEY=local-be0546acbdda04d2949d57a384bcb9552c9aede7
-output_dir=/cluster/home/wiktorh/Desktop/scbm/slurm_outputs/$today
+output_dir=/path/to/file/$today
 output_file=${output_dir}/job-%J.txt
 if [ ! -d ${output_dir} ]; then echo Creating log directory for $today.; mkdir ${output_dir};
 else echo Log directory exists already.;
@@ -23,15 +23,15 @@ lr=0.0001
 lr_scheduler='step'
 weight_decay=0.01
 
-for i in 404 505 606 707 # 3 random seeds
+for i in 404 505 606 # 3 random seeds
 do
 
 save_model='True'
-save_model_dir=/cluster/work/vogtlab/Group/wiktorh/PSCBM/models/
-cd /cluster/home/wiktorh/Desktop/scbm/scripts/
+save_model_dir=/path/to/file/
+cd /path/to/file/
 echo Submitting job
 # 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
-for cov in 'global'
+for cov in 'global' 'amortized'
 do
                     tag=${model}_${cov}_${lr_scheduler}_decay_${weight_decay}_final
                     sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
