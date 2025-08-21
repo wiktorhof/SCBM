@@ -220,8 +220,3 @@ class SCBLoss(nn.Module):
         total_loss = target_loss + concepts_loss + prec_loss
 
         return target_loss, concepts_loss, prec_loss, total_loss
-
-class InterventionLoss(nn.Module):
-    """
-    Loss function for optimizing covariance for performance on interventions
-    """

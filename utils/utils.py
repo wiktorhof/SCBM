@@ -11,7 +11,6 @@ from functools import wraps
 
 
 def reset_random_seeds(seed):
-    # Let me know if I'm missing something here :) - MV
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     np.random.seed(seed)
     random.seed(seed)

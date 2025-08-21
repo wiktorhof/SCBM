@@ -26,15 +26,13 @@ reg_weight=1
 save_model='False'
 save_model_dir=/path/to/file/
 cd /path/to/file/
-echo Submitting job
 
-for cov in 'global'
-do
+cov='global'
 for lr_scheduler in 'step' 'cosine'
 do
-    for lr in 0.0001
+    for lr in 0.001 0.0001 0.00001
     do
-        for weight_decay in 16 32 64 
+        for weight_decay in 0 0.01 1
         do
             for i in 112 
             do
@@ -46,13 +44,12 @@ do
                         model.cov_type=${cov} model.mask_density_train=0.2 \
                         model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} \
                         model.p_epochs=200 model.i_epochs=200 model.lr_scheduler=${lr_scheduler} \
-                    model.train_interventions=True model.pretrain_covariance=False \
-                    model.calculate_curves=False model.learning_rate=${lr} model.weight_decay=${weight_decay} \
-		    model.calculate_interventions=False \
-                    'model.additional_tags=["hyperparams_interventions"]'
+                        model.train_interventions=True model.pretrain_covariance=False \
+                        model.calculate_curves=False model.learning_rate=${lr} model.weight_decay=${weight_decay} \
+		                model.calculate_interventions=False \
+                        'model.additional_tags=["hyperparams_interventions"]'
 
             done
         done
     done
-done
 done
