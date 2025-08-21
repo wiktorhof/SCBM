@@ -13,7 +13,6 @@ from torchmetrics import Metric
 from torchmetrics.utilities import dim_zero_cat
 import wandb
 import time
-from time import perf_counter
 
 from utils.metrics import calc_target_metrics, calc_concept_metrics
 from utils.plotting import compute_and_plot_heatmap
@@ -77,7 +76,6 @@ def train_one_epoch_pscbm_with_loss(
             if p.grad is not None:
                 p_norm = p.grad.data.norm(2)
                 run.log({f"train_cov/{name}_gradient_norm": p_norm})
-                # print(f"train_cov/{name}_gradient_norm: {p_norm}")
         optimizer.step()
         c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
         
@@ -134,12 +132,9 @@ def train_one_epoch_pscbm_with_interventions(
     """
     model.train()
     metrics.reset()
-    # run.log({"epoch": epoch+1})
 
     start_time = time.perf_counter()
     # Calculate the number of ones in an intervention mask. It is a list of 1 or 2 elements.
-    # If len(num_ones) == 1, it is the constant number of ones for every mask
-    # If len(num_ones) == 2, it contains the lower and upper bounds for the number of ones per mask
     num_concepts = config.data.num_concepts
     if type(mask_density) == float:
         if 0.0 >= mask_density or 1.0 < mask_density:
@@ -176,9 +171,6 @@ def train_one_epoch_pscbm_with_interventions(
             num_ones_per_mask = num_ones[0]
             indices = torch.topk(scores, num_ones_per_mask, dim=2).indices
             masks.scatter_(2,indices,1) #dim, idx, src
-        # assert (
-        # (masks.sum(dim=2)==num_ones_per_mask).all()
-        # )
         masks = masks.to(device)
         concepts_pred_mu = torch.logit(concepts_pred_probs, eps=1e-6)
         accumulated_loss = 0
@@ -200,9 +192,6 @@ def train_one_epoch_pscbm_with_interventions(
             c_norm = torch.norm(concepts_cov) / (concepts_cov.numel() ** 0.5)
             target_loss, concepts_loss, prec_loss, total_loss = loss_fn(c_mcmc_probs, concepts_true, y_pred_intervened, target_true, concepts_cov, cov_not_triang=True)
             accumulated_loss += total_loss
-            # total_loss.backward(retain_graph=True)
-            # optimizer.step()
-            # Store predictions
             metrics.update(
                 target_loss,
                 concepts_loss,
@@ -549,10 +538,6 @@ def create_pscbm_validation_dataloader(
                 num_ones_per_mask = num_ones[0]
                 indices = torch.topk(scores, num_ones_per_mask, dim=2).indices
                 masks.scatter_(2,indices,1) #dim, idx, src
-            # TODO Reintroduce the assertion.
-            # assert (
-            # (masks.sum(dim=2)==num_ones).all()
-            # )
             masks_dataset.append(masks)
             concepts_pred_probs, _, _, _, intermediate = model(
                 batch_features, 
@@ -564,15 +549,9 @@ def create_pscbm_validation_dataloader(
             concepts_pred_mu = torch.logit(concepts_pred_probs,eps=1e-6)
             # If the underlying CBM is hard, it returns a tensor of concept samples. In soft case it doesn't, so we just use concepts_pred_probs. I am not sure, how it
             # Behaves in CEM case.
-            # concepts_mcmc_probs = concepts_pred_probs.unsqueeze(-1)
-            # target_loss, concepts_loss, precision_loss, total_loss = loss_fn(concepts_mcmc_probs, concepts_true, target_pred_logits_interv, target_true, concepts_cov, cov_not_triang=True)
-
+           
             intervention_validation_dataset.append(
                 [
-                    # target_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                    # concepts_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                    # precision_loss.cpu().unsqueeze(0).expand(target_true.shape[0]),
-                    # total_loss.cpu().unsqueeze(0).expand(target_true.shape[0]), 
                     concepts_pred_mu.cpu(),
                     concepts_true.cpu(),
                     target_true.cpu(),
@@ -592,15 +571,6 @@ def create_pscbm_validation_dataloader(
         # masks_dataset = torch.swapdims(masks_dataset, 0, 1)
         intervention_dataset = TensorDataset(
             *intervention_validation_dataset,
-            # intervention_validation_dataset[0],  # target_loss
-            # intervention_validation_dataset[1],  # concepts_loss
-            # intervention_validation_dataset[2],  # precision_loss
-            # intervention_validation_dataset[3],  # total_loss
-            # intervention_validation_dataset[4],  # concepts_pred_mu
-            # intervention_validation_dataset[5],  # concepts_cov
-            # intervention_validation_dataset[6],  # concepts_true
-            # intervention_validation_dataset[7],  # target_true
-            # intervention_validation_dataset[8],  # batch_features
             masks_dataset,                       # masks
         )
         intervention_validation_loader = DataLoader(

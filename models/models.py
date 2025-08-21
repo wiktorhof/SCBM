@@ -60,11 +60,6 @@ def load_weights(model: nn.Module, config: DictConfig):
     else:
         # experiment_type records information about the model, concept encoding and dataset
         experiment_type = Path(config.experiment_dir).parent
-        # Get the first file that matches experiment_type and is a PyTorch file (we assume, it contains proper model weights)
-        # try:
-        #     model_dir = experiment_type.glob("**/*.pth").__next__()
-        # except StopIteration:
-        #     raise FileNotFoundError("No file to load CBM weights!")
         for model_dir in experiment_type.glob("**/*.pth"):
             """
             I want to add additional checks here, to make sure that weights are loaded
@@ -92,8 +87,7 @@ def load_weights(model: nn.Module, config: DictConfig):
                         f"for concordance.\n")
             else:
                 raise FileNotFoundError("No model with corresponding configuration to load weights from it.")
-# TODO Introduce an inheritance structure: CBM -> SCBM -> PSCBM and make this function 
-# part of SCBM class            
+
 def initialize_covariance(config: DictConfig, model: nn.Module, train_loader: torch.utils.data.DataLoader, device):
     cov_type = model.cov_type
     if cov_type.startswith("empirical") or cov_type=="global":
@@ -176,7 +170,6 @@ class PSCBM(nn.Module):
         self.num_classes = config.data.num_classes
         self.encoder_arch = config_model.encoder_arch
         self.head_arch = config_model.head_arch
-        # self.training_mode = config_model.training_mode
         self.training_mode = 'joint' # In PSCBM if we train covariance, we will need to backpropagate target error through concept sampling
         self.concept_learning = config_model.concept_learning
         self.num_monte_carlo = config_model.num_monte_carlo
@@ -350,12 +343,9 @@ class PSCBM(nn.Module):
             if use_covariance:
                 intermediate = self.encoder(x) if intermediate is None else intermediate
                 c_mu = self.concept_predictor(intermediate)
-                # concepts_cov = numerical_stability_check(concepts_cov, concepts_cov.device)
                 c_dist = MultivariateNormal(c_mu, covariance_matrix=concepts_cov)
                 c_mcmc_logit = c_dist.rsample([self.num_samples]).movedim(0, -1) # [batch_size, num_concepts, num_samples]
                 c_mcmc_prob = self.act_c(c_mcmc_logit)
-                # At this point original SCBM implementation kicks in
-                # START COPY-PASTE
                 # For all MCMC samples simultaneously sample from Bernoulli
                 if validation or self.training_mode == "sequential":
                     # No backpropagation necessary - we only train the head after concept predictor has been trained
@@ -376,13 +366,11 @@ class PSCBM(nn.Module):
                     else:
                         c_mcmc = mcmc_relaxed
 
-                # I replaced the for loop from the original code with a vectorized version. The result is the same but it takes roughly 30 times less with 100 MCMC samples and batch size 384
                 if self.concept_learning == "hard":
                     c = c_mcmc
                 elif self.concept_learning == "soft":
                     c = c_mcmc_logit
                 else:
-                    # I could implement CEM here if time is
                     raise NotImplementedError
                 # Move concepts dimension to the front. Pass everything at once through the head
                 c = c.movedim(-1, 0)
@@ -391,7 +379,6 @@ class PSCBM(nn.Module):
                     y_pred_probs = torch.sigmoid(y_pred_logits).mean(0)
                 else:
                     y_pred_probs = torch.softmax(y_pred_logits, dim=-1).mean(0)
-                # Again I ask: Why do we calculate logits and then probabilities from them is obvious. But why do we move back to the logit space then?
                 if self.pred_dim == 1:
                     y_pred_logits = torch.logit(y_pred_probs, eps=1e-6)
                 else:

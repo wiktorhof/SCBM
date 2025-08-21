@@ -1,7 +1,7 @@
 #!/bin/bash
 #This script trains PSCBM over several random instantiations
 #Including multiple underlying pre-trained CBMs
-#With the SCBM loss, using the hyperparameters
+#Without concept interventions, using the hyperparameters
 #Obtained by tuning.
 eval "$(conda shell.bash hook)"
 
@@ -32,8 +32,6 @@ reg_weight=1
 save_model='True'
 save_model_dir=/path/to/file/
 cd /path/to/file/
-echo Submitting job
-# 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
 
 CBMs=(
     '/path/to/file/20250401-162246_24835'
@@ -50,16 +48,11 @@ CBMs=(
 
 seeds=( 1001 2902 3073 4064 5055 6046 7073 8082 9091 )
 
-for i in "${!CBMs[@]}"
-do
-    echo "${CBMs[$i]} with seed ${seeds[$i]}"
-done
-
 # Train with amortized covariance
 cov='amortized'
 lr_scheduler='cosine'
 lr=0.0001
-weight_decay=0 #Doesn't have an effect
+weight_decay=0 #No significant difference has been observed if greater than 0.
 
 for i in "${!CBMs[@]}"
 do

@@ -5,8 +5,6 @@
 #SBATCH --time=0-24:00:00
 #SBATCH -p gpu
 #SBATCH --gres=gpu:1
-#Lines that start with SBATCH are merely comments for bash. I cannot use variables there
-#Lines that start with SBATCH are merely comments for bash. I cannot use variables there
 
 now=$(date +%y:%m:%d:%H:%M)
 output_filename=~/path/to/file/$now.txt
@@ -21,5 +19,4 @@ echo
 echo $(which python)
 
 python -u train.py "$@"
-#python ~/path/to/file/environment_test.py
 

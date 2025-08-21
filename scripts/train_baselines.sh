@@ -22,15 +22,14 @@ reg_weight=1
 lr=0.0001
 lr_scheduler='step'
 weight_decay=0.01
+save_model='True'
 
 for i in 404 505 606 # 3 random seeds
 do
 
-save_model='True'
 save_model_dir=/path/to/file/
 cd /path/to/file/
-echo Submitting job
-# 48 jobs in total. Each one takes some 20 minutes on 1 GPU. So totally it is 16 GPU hours.
+
 for cov in 'global' 'amortized'
 do
                     tag=${model}_${cov}_${lr_scheduler}_decay_${weight_decay}_final
@@ -40,7 +39,27 @@ do
                     save_model=${save_model} experiment_dir=${save_model_dir} \
                     model.cov_type=${cov} model.weight_decay=${weight_decay} \
                     model.train_batch_size=${train_batch_size} model.reg_weight=${reg_weight} model.lr_scheduler=${lr_scheduler} \
-                    model.val_batch_size=256 'model.additional_tags=[final,conf_interval]'
+                    model.val_batch_size=256 'model.additional_tags=[final]'
 
 done
+done
+
+
+model='CBM'
+for i in 404 505 606 # 3 random seeds
+do
+
+save_model_dir=/path/to/file/
+cd /path/to/file/
+
+tag=${model}_${cov}_${lr_scheduler}_decay_${weight_decay}_final
+sbatch --output=${output_file} --job-name=${tag} --mem=$mem train.sh +model=$model \
++data=$data experiment_name="${data}_${tag}_${i}" seed=$i model.tag=$tag \
+model.concept_learning=$concept_learning model.encoder_arch=$encoder_arch \
+save_model=${save_model} experiment_dir=${save_model_dir} \
+model.weight_decay=${weight_decay} \
+model.train_batch_size=${train_batch_size} model.lr_scheduler=${lr_scheduler} \
+model.val_batch_size=256 'model.additional_tags]'
+
+
 done

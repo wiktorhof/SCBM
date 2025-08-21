@@ -5,7 +5,7 @@ for#!/bin/bash
 eval "$(conda shell.bash hook)"
 conda activate scbm
 today=$(date +%y-%m-%d)
-export WANDB_API_KEY=local-be0546acbdda04d2949d57a384bcb9552c9aede7
+
 output_dir=/path/to/file/$today
 output_file=${output_dir}/job-%J.txt
 if [ ! -d ${output_dir} ]; then echo Creating log directory for $today.; mkdir ${output_dir};
@@ -18,7 +18,6 @@ encoder_arch='resnet18'
 model='SCBM'
 
 concept_learning='hard'
-cov='amortized'
 train_batch_size=128
 reg_weight=1
 
@@ -27,10 +26,9 @@ i=11
 save_model='True'
 save_model_dir=/path/to/file/
 cd /path/to/file/
-echo Submitting job
 for cov in 'amortized' 'global'
 do
-for lr_scheduler in 'cosine'
+for lr_scheduler in 'cosine' 'step'
 do
 for weight_decay in 0 0.01
 do
@@ -50,7 +48,7 @@ done
 
 model='CBM'
 
-for lr_scheduler in 'cosine'
+for lr_scheduler in 'cosine' 'step'
 do
 for weight_decay in 0 0.01
 do

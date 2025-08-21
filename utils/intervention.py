@@ -107,10 +107,6 @@ def intervene_pscbm(train_loader, test_loader, model, metrics, epoch, config, lo
             metrics_dict = metrics.compute(validation=True, config=config)
 
             # # define which metrics will be plotted against it
-            # if first_intervention:
-            #     # define our custom x axis metric for wandb
-            #     run.define_metric("intervention/num_concepts_intervened")
-            #     first_intervention = False
             for i, (k, v) in enumerate(metrics_dict.items()):
                 run.define_metric(
                     f"intervention_{strategy}_{policy}/{k}",
@@ -391,10 +387,6 @@ def intervene_scbm(
             metrics_dict = metrics.compute(validation=True, config=config)
 
             # define which metrics will be plotted against it
-            # if first_intervention:
-            #     # define our custom x axis metric for wandb
-            #     run.define_metric("intervention/num_concepts_intervened")
-            #     first_intervention = False
             for i, (k, v) in enumerate(metrics_dict.items()):
                 run.define_metric(
                     f"intervention_{strategy}_{policy}/{k}",
@@ -593,13 +585,6 @@ def intervene_cbm(
     policies = config.model.inter_policy.replace(' ','').split(",")
     strategies = config.model.inter_strategy.replace(' ','').split(",")
     num_interventions = min(config.data.num_interventions, config.data.num_concepts)
-    # Lift this restriction s.t. other strategies could be evaluated with hard CBM as well
-    # if config.model.model == "cbm" and config.model.concept_learning in (
-    #     "hard",
-    #     "autoregressive",
-    #     "embedding",
-    # ):
-    #     strategies = ["hard"]
     # Intervening with different strategies
     first_intervention = True
     for strategy in strategies:
@@ -1154,21 +1139,6 @@ class PSCBM_Strategy:
 
             interv_mu = perm_interv_mu
             interv_cov = perm_interv_cov
-            # Concatenate intervened on concept logits with conditioned logits
-            # perm_interv_mu = torch.cat(
-            #     (
-            #         perm_mu[:, :num_intervened],
-            #         perm_interv_mu
-            #     ),
-            #     dim=1
-            # )
-            # Move intervened logits back to original order
-            # interv_mu = perm_interv_mu.gather(1, indices_reversed)
-            # # Move intervened covariance back to original order. A slightly different method than
-            # # in mu, is more straight=forward for 2D tensors
-            # perm_cov[:, num_intervened:, num_intervened:] = perm_interv_cov
-            # interv_cov = perm_cov.gather(1, indices_reversed.unsqueeze(2).expand(-1,-1, perm_cov.size(2)))
-            # interv_cov = interv_cov.gather(2, indices_reversed.unsqueeze(1).expand(-1, perm_cov.size(1), -1))
 
 
         assert (

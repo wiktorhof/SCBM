@@ -6,10 +6,7 @@ import os
 import torch
 from torch.utils.data import DataLoader
 
-from datasets.synthetic_dataset import get_synthetic_datasets
 from datasets.CUB_dataset import get_CUB_dataloaders
-from datasets.cifar10_dataset import get_CIFAR10_CBM_dataloader
-from datasets.cifar100_dataset import get_CIFAR100_CBM_dataloader
 from utils.utils import numerical_stability_check
 
 
@@ -29,54 +26,17 @@ def get_data(config_base, config, gen):
     Returns:
         tuple: A tuple containing the training data loader, validation data loader, and test data loader.
     """
-    try:
-        hostname = os.uname()[1]
-    except AttributeError: # On Windows, os doesn't have the attribute uname. The error implicitly means that I am not on the cluster
-        hostname = ''
-    if "biomed" in hostname:
-        # Remote Datafolder for our group cluster
-        config.data_path = "/cluster/dataset/vogtlab/Projects/CBM/"
-    elif "data_path" not in config:
+    if "data_path" not in config:
         # Local Datafolder if not already specified in yaml
         config.data_path = "../datasets/"
     elif config.data_path is None:
         config.data_path = "../datasets/"
     else:
         pass
-
-    if config.dataset == "synthetic":
-        print("SYNTHETIC DATASET")
-        type = None
-        if "sim_type" in config:
-            type = config.sim_type
-            print("SIMULATION TYPE: " + str(type))
-            if config.num_classes > 2:
-                raise NotImplementedError(
-                    "ERROR: Only binary classification is supported for synthetic data."
-                )
-        trainset, validset, testset = get_synthetic_datasets(
-            num_vars=config.num_covariates,
-            num_points=config.num_points,
-            num_predicates=config.num_concepts,
-            train_ratio=0.6,
-            val_ratio=0.2,
-            type=type,
-            seed=config_base.seed,
-        )
-    elif config.dataset == "CUB":
+    if config.dataset == "CUB":
         print("CUB DATASET")
         trainset, validset, testset = get_CUB_dataloaders(
             config,
-        )
-    elif config.dataset == "cifar10":
-        print("CIFAR-10 DATASET")
-        trainset, validset, testset = get_CIFAR10_CBM_dataloader(
-            config.data_path,
-        )
-    elif config.dataset == "cifar100":
-        print("CIFAR-100 DATASET")
-        trainset, validset, testset = get_CIFAR100_CBM_dataloader(
-            config.data_path,
         )
     else:
         NotImplementedError("ERROR: Dataset not supported!")
@@ -107,32 +67,6 @@ def get_data(config_base, config, gen):
     )
 
     return train_loader, val_loader, test_loader
-
-def make_full_rank(covariance, condition_number=None):
-    """
-    Make the covariance matrix full rank by increasing its smallest singular values. This function has the additional effect of controlling the condition number of the covariance matrix.
-    This is important for numerical stability when computing the Cholesky decomposition.
-
-    Args:
-        covariance (torch.Tensor): The covariance matrix.
-
-    Returns:
-        torch.Tensor: The modified covariance matrix with full rank.
-    """
-    # Add a small value to the diagonal to make it full rank
-    if not condition_number:
-        # If condition number is not provided, make it 1/sqrt(eps) where eps is the machine epsilon for the data type of the covariance matrix. 
-        # This value is suggested by the internet.
-        condition_number = torch.reciprocal(torch.sqrt(torch.tensor((torch.finfo(covariance.dtype).eps))))
-    U, S, Vh = torch.linalg.svd(covariance)
-    if (S[0] / S[-1]) > condition_number:
-        # If the condition number is too large, set the smallest singular value to a fraction of the largest singular value
-        S2 = S.clamp(min=S[0] / condition_number)
-        num_changed = (~torch.isclose(S2, S)).sum()
-        print(f"The covariance matrix is ill-conditioned. {num_changed} smallest singular values have been clamped at {S[0]/condition_number}.")
-        covariance = U @ torch.diag(S2) @ Vh
-        
-    return covariance
 
 def get_empirical_covariance(dataloader, ratio=1, scaling_factor=None):
     """
@@ -185,7 +119,6 @@ def get_empirical_covariance(dataloader, ratio=1, scaling_factor=None):
         covariance[rows, cols] /= scaling_factor
         covariance[cols, rows] /= scaling_factor
     covariance = numerical_stability_check(covariance, device="cpu")
-    # covariance = make_full_rank(covariance)
     lower_triangle = torch.linalg.cholesky(covariance)
 
     ####### Alternative cov computation if dataset was too large for memory
@@ -262,7 +195,6 @@ def get_empirical_covariance_of_predictions(model, dataloader, ratio=1, scaling_
             covariance[rows, cols] /= scaling_factor
             covariance[cols, rows] /= scaling_factor
         covariance = numerical_stability_check(covariance, device="cpu")
-        # covariance = make_full_rank(covariance)
         lower_triangle = torch.linalg.cholesky(covariance)
 
     # ###### Alternative cov computation if dataset was too large for memory
@@ -318,13 +250,6 @@ def get_concept_groups(config):
                 concept_names.append(line.replace("\n", "").split("::"))
         concept_names_graph = [": ".join(name) for name in concept_names]
 
-    elif config.dataset == "cifar10":
-        # Oracle grouping based on concept type for cifar10
-        with open(
-            os.path.join(config.data_path, "cifar10/cifar10_filtered.txt"), "r"
-        ) as file:
-            # Read the contents of the file
-            concept_names_graph = [line.strip() for line in file]
     else:
         concept_names_graph = [str(i) for i in range(config.num_concepts)]
 
