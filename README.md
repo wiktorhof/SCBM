@@ -21,12 +21,11 @@ some weaknesses of our methods.
 ## Instructions
 
 1. Install the packages and dependencies in the file `environment.yml`. 
-2. Download the datasets described in the manuscript and update the `data_path` variable in `./configs/data/data_defaults.yaml`. For CUB, we use the original Concept Bottleneck Model's CUB version. For CIFAR, we use the concept names from Label-Free Concept Bottleneck Models. 
-3. If using CIFAR-10 / CIFAR-100, run `./datasets/create_dataset_cifar.py`
-4. For Weights & Biases support, set mode to 'online' and adjust entity in `./configs/config.yaml`.
-5. Run the script `train.py` with the desired configuration of dataset and model from the `./configs/` folder. We provide a description of all arguments in the config files.  
-**Specifying the type of SCBM**:  Replace `config.model.cov_type` and `config.model.reg_precision` to change between global and amortized version.
+2. Download the datasets described in the manuscript and update the `data_path` variable in `./configs/data/data_defaults.yaml`. For CUB, we use the original Concept Bottleneck Model's CUB version.
+
+3. For Weights & Biases support, set mode to 'online' and adjust entity in `./configs/config.yaml`.
+4. Run the script `train.py` with the desired configuration of dataset and model from the `./configs/` folder. We provide a description of all arguments in the config files.
 
 ## Running Experiments
 
-We provide scripts in the `./scripts/` directory to run experiments on a cluster and reproduce our results. 
+We provide scripts in the `./scripts/` directory to run experiments on a SLURM cluster and reproduce our results. 
