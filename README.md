@@ -2,21 +2,7 @@
 This repository contains the code for the thesis "*Post-hoc Stochastic Concept Bottleneck Models*" (SCBM).
 (not yet available online)
 
-**Abstract**: Recent studies have shown that modeling concept dependencies in Concept Bottle-
-neck Models (CBM) can lead to significant improvements in performance, espe-
-cially when concept interventions are made. In this paper, we introduce Post-hoc
-Stochastic Concept Bottleneck Models (PSCBM), a method to augment an existing
-CBM that treats concepts as independent with a multivariate normal distribution,
-which can model concept correlations. Importantly, the existing model doesn’t
-need to be retrained. It is only necessary to learn the covariance matrix of the
-normal distribution. For this, we propose 2 methods: 1. minimizing the regular
-CBM loss without interventions, 2. minimizing the same loss after an intervention
-on a random subset of concepts. In addition, we propose the usage of empirical
-covariance of the training dataset, which doesn’t require any training. We evaluate
-our methods on the CUB-200-2011 dataset with various intervention strategies,
-showing that they can achieve an improvement over a simple CBM in terms of
-concept and target accuracy at test time and with interventions. We also discuss
-some weaknesses of our methods.
+**Abstract**: Concept Bottleneck Models (CBMs) are interpretable models that predict the target variable through high-level human-understandable concepts, allowing users to intervene on mispredicted concepts to adjust the final output. While recent work has shown that modeling dependencies between concepts can improve CBM performance—especially under interventions—such approaches typically require retraining the entire model, which may be infeasible when access to the original data or compute is limited. In this paper, we introduce Post-hoc Stochastic Concept Bottleneck Models (PSCBMs), a lightweight method that augments any pre-trained CBM with a multivariate normal distribution over concepts by adding only a small covariance-prediction module, without retraining the backbone model. We propose two training strategies and show on real-world data that PSCBMs consistently match or improve both concept and target accuracy over standard CBMs at test time. Furthermore, we show that due to the modeling of concept dependencies, PSCBMs perform much better than CBMs under interventions, while remaining far more efficient than retraining a similar stochastic model from scratch.
 
 ## Instructions
 
